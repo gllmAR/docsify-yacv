@@ -42,8 +42,10 @@ Python code block. The same Markdown works everywhere.
   unloading of far-offscreen viewers, and one viewer app per fence instead of per model.
 - **Optimized embedded viewer** — the repo ships a headless, pruned yacv build: no Monaco, drawers
   closed, full-canvas 3D and a ~6s faster Python bootstrap.
-- **Shared Python worker** — optionally run every live embed on a page in **one** Pyodide instance.
-  First boot ~20s, then each example renders in well under a second and the preview stays visible.
+- **Shared Python worker (default)** — run every live embed with the same settings in **one**
+  Pyodide instance. First boot ~12–20s, then each example renders in well under a second and the
+  preview/poster stays visible. No self-hosting is required: the worker is fetched from the hosted
+  viewer and run from a Blob worker on the docs origin.
 - **No build, static hosting** — the plugin is a single root-level `docsify-yacv.js`, committed and
   served as-is. The repository root is the docsify demo.
 
@@ -218,8 +220,8 @@ window.$docsify = {
 | ------ | ------- | ----------- |
 | `viewer` | `https://gllmar.github.io/docsify-yacv/viewer/` | Headless optimized viewer for embeds (absolute or relative). |
 | `openViewer` | `https://yeicor-3d.github.io/yet-another-cad-viewer/` | Viewer used by the **Open** action (full upstream build with the editor). |
-| `runtime` | `viewer` | `viewer` (Pyodide per embed) or `worker` (one shared same-origin worker). |
-| `workerUrl` | `''` | Module worker for `runtime: 'worker'` (e.g. `./viewer/yacv-worker.js`). |
+| `runtime` | `worker` | `worker` (shared Pyodide per settings group) or `viewer` (Pyodide per embed). |
+| `workerUrl` | `https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js` | Shared worker script (cross-origin is wrapped in a Blob worker). |
 | `workerWarmup` | `true` | Pre-boot the shared worker on idle when a live embed exists. |
 | `height` | `480px` | Default stage height (number = px, CSS length, or `auto`). |
 | `title` | `''` | Default toolbar title. |
@@ -255,7 +257,7 @@ performance notes, styling variables, security notes and troubleshooting.
 | Colors, multiple objects, highlights | `obj.color = (r,g,b,a)` + `show(a, b, highlight)` |
 | Textures and images | Data URIs or files via yacv's `show(..., texture=...)`. |
 | Keep examples in real `.py` files | `code-src="examples/part.py"` or a `yacv` fence with a `.py` URL |
-| Editable sandbox inside the docs | `editor=0.9` (Monaco, F10 to run) |
+| Editable sandbox inside the docs | `editor=0.9` with `runtime=viewer` and the upstream viewer |
 | Additional pure-Python packages | `await micropip.install("bd_warehouse")` inside the snippet |
 | Static export for fast pages | `yacv_server.export_all()` + a `yacv` fence |
 
@@ -289,6 +291,42 @@ offline-capable embed. The `editor` option is ignored by the headless viewer —
 Point `viewer` at the upstream URL if you need the in-iframe Monaco editor. See
 [`viewer/NOTICE.md`](viewer/NOTICE.md) for provenance and licensing.
 
+## Shared Python worker (default)
+
+With `runtime: 'worker'` (the default), **one** Pyodide instance (build123d + OCP + yacv_server) per
+`version`/`debug`/`constraints` combination serves the live embeds on the page. The viewers stay in
+cheap mesh mode and receive GLBs from the worker; previews/posters remain visible while the first
+example builds.
+
+```js
+// These are the defaults.
+window.$docsify = {
+  yacv: {
+    viewer: 'https://gllmar.github.io/docsify-yacv/viewer/',
+    openViewer: 'https://yeicor-3d.github.io/yet-another-cad-viewer/',
+    runtime: 'worker',
+    workerUrl: 'https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js',
+  },
+};
+```
+
+- **No self-hosting needed.** The plugin fetches the worker script (GitHub Pages allows CORS) and
+  runs it from a Blob worker on your origin. A cross-origin viewer receives GLBs through a
+  `postMessage` bridge in `viewer/index.html`; a same-origin viewer uses its direct API.
+- **Fallback:** if the worker cannot start (CSP, network) or the viewer has no bridge/API, the embed
+  automatically reloads with the per-viewer runtime.
+- First run bootstraps Pyodide (~12–20s warm cache); later runs with the same settings take
+  **~0.5–1s**. Static/preview embeds never boot Python.
+- Workers are shared **per settings combination**: embeds with the same `version`, `debug` and
+  `constraints` reuse one interpreter; a different combination gets its own shared worker. The
+  version/debug examples in the demo are `auto-load=false`, so their extra workers only boot on
+  **Run**.
+- `workerWarmup` (default `true`) pre-boots the worker on idle for auto-load live embeds; preview-only
+  embeds warm shortly after their preview/poster appears (or on pointer/focus intent).
+- `maxLiveConcurrent` is bypassed in worker mode (each worker serializes its runs).
+- If your CSP blocks `blob:` workers or jsDelivr, use `runtime: 'viewer'` or self-host a compatible
+  worker. Copying `viewer/` + `yacv-worker.js` next to your docs gives a same-origin offline setup.
+
 ## Time to interactive
 
 Measured on the live demo with a warm browser cache (Chromium, M1-class machine):
@@ -296,7 +334,7 @@ Measured on the live demo with a warm browser cache (Chromium, M1-class machine)
 | Embed | Time until the model is visible |
 | ----- | ------------------------------- |
 | Preview with `poster` (image) | **<0.5s**; interactive viewer on hover/tap |
-| Static `yacv` model (GLB) | ~2–3s (optimized viewer), ~3s upstream |
+| Static `yacv` model (GLB) | ~1s cold / ~0.3s warm with posters/preloads |
 | Live build123d **with `preview`** | preview in ~1–3s; live geometry replaces it when the sandbox finishes |
 | Live build123d **with `preview` + `auto-load=false`** | preview in ~1–3s; sandbox starts only on **Run build123d** |
 | Live build123d, optimized viewer (per-viewer runtime) | **~15s** warm cache |

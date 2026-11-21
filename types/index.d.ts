@@ -8,6 +8,9 @@ export declare const DEFAULT_VIEWER: string;
 /** Default viewer for the "Open" action: the full upstream yacv build. */
 export declare const DEFAULT_OPEN_VIEWER: string;
 
+/** Default shared worker (may be cross-origin; it is wrapped in a Blob worker). */
+export declare const DEFAULT_WORKER: string;
+
 export type YacvSettingValue = string | number | boolean;
 
 /**
@@ -52,13 +55,15 @@ export interface DocsifyYacvOptions {
   /** How far before the viewport lazy embeds start loading. Default: "200px". */
   lazyMargin?: string | number;
   /**
-   * `"viewer"` (default) runs build123d inside each viewer iframe. `"worker"`
-   * runs one shared same-origin Python worker for every live embed. Worker mode
-   * requires a same-origin viewer exposing `__b3dLiveViewer` (the bundled
-   * `viewer/` build) and `workerUrl`.
+   * `"worker"` (default) runs one shared Python worker per
+   * version/debug/constraints combination. `"viewer"` runs build123d inside
+   * each viewer iframe (needed for the in-iframe Monaco editor).
    */
   runtime?: 'viewer' | 'worker';
-  /** Same-origin module worker for `runtime: "worker"`. */
+  /**
+   * Worker script for `runtime: "worker"`. May be cross-origin (it is fetched
+   * and wrapped in a Blob worker). Default: the hosted viewer's worker.
+   */
   workerUrl?: string;
   /** Pre-boot the shared worker on idle when a live embed exists. Default: true. */
   workerWarmup?: boolean;

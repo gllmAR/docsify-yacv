@@ -10,9 +10,9 @@ noticeably faster. See [performance notes](reference.md?id=performance-and-limit
 >
 > Add `vertices=False` to `show()` for a cleaner embed; yacv draws small vertex markers by default.
 >
-> These examples use the shared Python worker (`runtime: 'worker'`), so they all share one
-> interpreter. Examples that pin a build123d version, change constraints/debug wheels, or open the
-> in-iframe Monaco editor use `runtime=viewer` because the worker has one page-wide configuration.
+> These examples use the shared Python worker (`runtime: 'worker'`). Embeds with the same
+> version/debug/constraints share one interpreter; a different combination gets its own shared
+> worker. The version/debug examples use `auto-load=false`, so their worker only boots on **Run**.
 
 ## A parametric part
 
@@ -91,7 +91,7 @@ show_object(part)
 By default the sandbox installs the latest stable build123d. Use `version` to pin a PyPI release,
 or to test a GitHub branch / tag / commit / pull request:
 
-```build123d version=dev runtime=viewer preview="assets/previews/cube.glb#name=cube" height=360 title="build123d dev branch"
+```build123d version=dev auto-load=false preview="assets/previews/cube.glb#name=cube" height=360 title="build123d dev branch"
 from build123d import *
 
 with BuildPart() as cube:
@@ -116,7 +116,7 @@ show(cube)
 `debug` installs OCP.wasm debug wheels (newer dev builds, better crash reports; slower).
 `constraints` passes pip constraints for every package the sandbox installs:
 
-```build123d debug constraints="numpy<2;packaging>=24" runtime=viewer preview="assets/previews/constraints.glb#name=constraints" height=340 title="Pinned sandbox dependencies"
+```build123d debug constraints="numpy<2;packaging>=24" auto-load=false preview="assets/previews/constraints.glb#name=constraints" height=340 title="Pinned sandbox dependencies"
 from build123d import *
 import numpy
 
@@ -146,24 +146,28 @@ browser; export a static GLB instead.
 
 ## Keep the sandbox editor open
 
-By default the in-iframe Monaco editor is hidden (`editor=0`) and docsify displays the source code
-above the viewer. Set `editor` to an opacity between `0` and `1` to show the editor instead, e.g.
-`editor=0.9`, or `editor=show`:
+The embedded demos run the headless, shared-worker viewer, so the in-page Monaco editor is not
+loaded. Use **Open** on any live example to get the full upstream viewer with the editor
+(`F10` runs, ▶ works there) without creating a second sandbox on the page.
 
-```build123d editor=0.85 runtime=viewer viewer="https://yeicor-3d.github.io/yet-another-cad-viewer/" preview="assets/previews/knob.glb#name=knob" height=520 title="Editable sandbox inside the iframe"
-from build123d import *
+If you really want Monaco inside an embed, use the full upstream viewer and the per-viewer runtime.
+This creates one Pyodide instance **per viewer**, so it is intentionally not used in this demo:
 
-with BuildPart() as knob:
-    Cylinder(14, 6)
-    with Locations((0, 0, 6)):
-        Cylinder(9, 10)
-    with Locations((0, 0, 16)):
-        Sphere(9, mode=Mode.SUBTRACT)
-
-show(knob)
+```js
+window.$docsify = {
+  yacv: {
+    runtime: 'viewer',
+    viewer: 'https://yeicor-3d.github.io/yet-another-cad-viewer/',
+  },
+};
 ```
 
-Press <kbd>F10</kbd> inside the editor to run, or use the ▶ button.
+````markdown
+```build123d editor=0.85 runtime=viewer viewer="https://yeicor-3d.github.io/yet-another-cad-viewer/"
+from build123d import *
+show(Box(10, 20, 30))
+```
+````
 
 ## Load code from a file
 

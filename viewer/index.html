@@ -8,6 +8,39 @@
   <script>
     window.__b3dLiveHost = true;
     window.__b3dLiveMode = new URLSearchParams(location.hash.slice(1)).has("pg_code") ? "python" : "mesh";
+
+    // docsify-yacv cross-origin bridge: the docs page runs one shared Python
+    // worker and posts GLB bytes here. This works even though the viewer is on a
+    // different origin from the docs.
+    window.addEventListener("message", (event) => {
+      if (event.source !== window.parent) return;
+      const data = event.data;
+      if (!data || typeof data.type !== "string") return;
+      if (data.type === "yacv:ping") {
+        try {
+          event.source.postMessage({ type: "yacv:ready" }, event.origin || "*");
+        } catch (_) {}
+        return;
+      }
+      const apply = () => {
+        const api = window.__b3dLiveViewer;
+        if (!api) {
+          setTimeout(apply, 50);
+          return;
+        }
+        try {
+          if (data.type === "yacv:model") {
+            const bytes = new Uint8Array(data.bytes);
+            api.loadMesh(new Blob([bytes], { type: "model/gltf-binary" }), data.name);
+          } else if (data.type === "yacv:remove") {
+            api.removeMesh(data.name);
+          }
+        } catch (error) {
+          console.error("docsify-yacv bridge:", error);
+        }
+      };
+      apply();
+    });
   </script>
   <script type="module" crossorigin src="./index-D7SUI9ZY.js"></script>
   <link rel="modulepreload" crossorigin href="./rolldown-runtime-COiEfhsA.js">

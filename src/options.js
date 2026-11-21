@@ -4,6 +4,9 @@ import { isPlainObject, normalizeSettingKey, toBool, toNumber } from './util.js'
 // Default embedded viewer: prebuilt headless build in this repo (no Monaco,
 // closed drawers, faster bootstrap). Static and preview embeds use mesh mode.
 export const DEFAULT_VIEWER = 'https://gllmar.github.io/docsify-yacv/viewer/';
+// The shared worker can be fetched from the hosted viewer: it runs in a Blob
+// worker on the docs origin, so no self-hosting is required.
+export const DEFAULT_WORKER = 'https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js';
 // Full upstream viewer for the "Open" action, where the editor is available.
 export const DEFAULT_OPEN_VIEWER = 'https://yeicor-3d.github.io/yet-another-cad-viewer/';
 
@@ -84,6 +87,8 @@ export const DEFAULT_OPTIONS = {
   openViewer: DEFAULT_OPEN_VIEWER,
   height: '480px',
   title: '',
+  /** Default poster image for preview-only embeds. */
+  poster: '',
   /** build123d version installed by the in-browser playground. */
   version: 'stable',
   /** Use OCP.wasm debug wheels (better crash reports, newer dev builds). */
@@ -102,6 +107,17 @@ export const DEFAULT_OPTIONS = {
   lazy: true,
   /** How far before the viewport (CSS px or %) a lazy embed starts loading. */
   lazyMargin: '200px',
+  /**
+   * Shared worker by default: one interpreter per version/debug/constraints
+   * combination, across all live embeds. Requires a viewer with the postMessage
+   * bridge (the default optimized viewer) or same-origin API; otherwise the
+   * plugin falls back to the per-viewer runtime.
+   */
+  runtime: 'worker',
+  /** Worker script; may be cross-origin (wrapped in a Blob worker). */
+  workerUrl: DEFAULT_WORKER,
+  /** Pre-boot the shared worker on idle when a live embed exists. */
+  workerWarmup: true,
   /** Maximum number of iframes created at the same time. */
   maxConcurrent: 2,
   /**

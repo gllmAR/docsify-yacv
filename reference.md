@@ -31,8 +31,8 @@ window.$docsify = {
 | -------------- | ------------------- | ------------------------------------------------ | ----------- |
 | `viewer`       | `string`            | `https://gllmar.github.io/docsify-yacv/viewer/`  | Headless optimized yacv for embeds (absolute or relative). |
 | `openViewer`   | `string`            | `https://yeicor-3d.github.io/yet-another-cad-viewer/` | Viewer used by the **Open** action (full upstream build with the editor). |
-| `runtime`      | `'viewer' \| 'worker'` | `viewer`                                     | Pyodide per embed, or one shared same-origin worker. |
-| `workerUrl`    | `string`            | `''`                                             | Module worker for `runtime: 'worker'`. |
+| `runtime`      | `'viewer' \| 'worker'` | `worker`                                     | Shared Pyodide per settings group, or Pyodide per embed. |
+| `workerUrl`    | `string`            | `https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js` | Shared worker script (cross-origin wrapped in a Blob worker). |
 | `workerWarmup` | `boolean`           | `true`                                           | Pre-boot the shared worker on idle. |
 | `height`       | `number \| string`  | `480px`                                          | Default viewer height. Numbers are pixels; `auto` uses a 4:3 area. |
 | `title`        | `string`            | `''`                                             | Default toolbar title. |
@@ -84,7 +84,7 @@ show(Box(10, 10, 10))
 | `chrome`          |                            | Override the global toolbar setting. |
 | `open`            |                            | `false` hides the **Open** action. |
 | `viewer`          |                            | Override the viewer URL for this embed. |
-| `runtime`         |                            | `viewer` or `worker` for this embed (worker mode uses the page-wide settings). |
+| `runtime`         |                            | `viewer` or `worker` for this embed (workers are shared per settings). |
 
 Any [yacv setting](#yacv-settings) can also be used as an attribute (case-insensitive, dashes and
 underscores are ignored): `edgeWidth=2`, `autoplay=false`, `pg_opacity_loaded=0.5`, ...
@@ -203,42 +203,35 @@ Set `viewer` to the upstream URL if you need the in-page Monaco editor (`editor`
 
 ## Shared worker runtime
 
-With `runtime: 'worker'`, `viewer/` runs in mesh mode and `viewer/yacv-worker.js` executes all live
-code in **one** Pyodide instance. The worker returns GLB bytes, which are handed to each viewer via
-`window.__b3dLiveViewer.loadMesh`.
+`runtime: 'worker'` is the default. One Pyodide instance per `version`/`debug`/`constraints`
+combination executes all matching live code. Viewers run in mesh mode and receive GLB bytes through
+their same-origin API or the cross-origin `postMessage` bridge in `viewer/index.html`.
 
 ```js
+// Defaults
 window.$docsify = {
   yacv: {
-    viewer: './viewer/',
+    viewer: 'https://gllmar.github.io/docsify-yacv/viewer/',
     openViewer: 'https://yeicor-3d.github.io/yet-another-cad-viewer/',
     runtime: 'worker',
-    workerUrl: './viewer/yacv-worker.js',
+    workerUrl: 'https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js',
   },
 };
 ```
 
 Requirements and limits:
 
-- viewer and worker must be same-origin (the plugin reads the viewer API from the iframe);
-- the worker boots once per page: first run ~20s (warm cache), later runs ~0.5–1s;
-- the worker uses the page-wide `version`, `debug` and `constraints`; use `runtime=viewer` on an
-  embed that needs different settings;
+- the worker script may be cross-origin: it is fetched (CORS) and wrapped in a Blob worker on the
+  docs origin; Pyodide and the bootstrap are fetched from their CDNs;
+- the viewer may be cross-origin: models are delivered via the postMessage bridge; a viewer without
+  a bridge/API triggers an automatic fallback to the per-viewer runtime;
+- the worker boots once per settings group (~12–20s warm cache), then runs are ~0.5–1s;
 - each run is isolated (user globals are removed), and `yacv.clear()` runs before the snippet;
-- `workerWarmup: true` (default) pre-boots on idle for auto-load live embeds; preview-only
-  embeds warm on pointer/focus intent so `auto-load=false` is respected; `false` disables it;
-- `maxLiveConcurrent` is ignored in worker mode.
-
-## Posters
-
-For preview-only embeds, a `poster` image is shown immediately instead of loading the viewer app.
-Hovering, tapping, focusing, or clicking **Run build123d** loads the interactive viewer (and warms
-the worker). This makes the first model paint effectively instant on slow connections:
-
-```markdown
-```build123d preview="assets/part.glb#name=part" poster="assets/part.png" auto-load=false
-```
-```
+- `workerWarmup: true` (default) pre-boots on idle for auto-load live embeds; preview-only embeds
+  warm shortly after their preview/poster or on pointer/focus intent; `false` disables it;
+- `maxLiveConcurrent` is ignored in worker mode;
+- CSP must allow `blob:` workers, jsDelivr, and the worker script origin. Otherwise use
+  `runtime: 'viewer'` or self-host.
 
 ## Time to interactive
 
@@ -246,12 +239,13 @@ Measured on the live demo with a warm cache (Chromium, M1-class machine):
 
 | Embed | Model visible |
 | ----- | ------------- |
-| Static GLB (`yacv` fence) | ~2–3s |
-| Live build123d + `preview` GLB | ~2–3s, replaced by live geometry when the sandbox finishes |
-| Live build123d + `preview` + `auto-load=false` | ~2–3s; sandbox starts on **Run build123d** |
-| Live build123d, optimized viewer (per-viewer runtime) | **~15s** |
-| Live build123d, shared worker, first example | ~20s (boot) |
+| Preview with `poster` (image) | **<0.5s**; viewer on intent |
+| Static GLB (`yacv` fence) | ~1s cold / ~0.3s warm |
+| Live build123d + `preview` GLB | ~1s, replaced by live geometry when the sandbox finishes |
+| Live build123d + `preview` + `auto-load=false` | ~1s; sandbox starts on **Run build123d** |
+| Live build123d, shared worker, first example | ~12–20s boot (preview visible) |
 | Live build123d, shared worker, later examples | **~0.5–1s** |
+| Live build123d, per-viewer runtime | **~15s** |
 | Live build123d, upstream viewer | ~21–30s (includes Monaco) |
 
 The live cost is Pyodide boot plus installing/importing build123d, OCP.wasm and the scientific

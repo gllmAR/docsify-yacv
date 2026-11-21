@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_OPEN_VIEWER,
   DEFAULT_OPTIONS,
+  DEFAULT_WORKER,
   DEFAULT_VIEWER,
   YACV_SETTING_TYPES,
   normalizeEditor,
@@ -23,8 +24,8 @@ test('resolveOptions: defaults', () => {
   assert.equal(options.maxConcurrent, 2);
   assert.equal(options.maxLiveConcurrent, 2);
   assert.equal(options.liveSlotMs, 30000);
-  assert.equal(options.runtime, 'viewer');
-  assert.equal(options.workerUrl, '');
+  assert.equal(options.runtime, 'worker');
+  assert.equal(options.workerUrl, DEFAULT_WORKER);
   assert.equal(options.workerWarmup, true);
   assert.equal(options.unloadOffscreen, true);
   assert.equal(options.unloadMargin, '100% 0px');

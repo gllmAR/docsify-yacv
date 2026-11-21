@@ -1,6 +1,6 @@
 import { mountAll } from './mount.js';
 import { normalizeTagWhitespace } from './parse.js';
-import { DEFAULT_OPEN_VIEWER, DEFAULT_VIEWER, resolveOptions } from './options.js';
+import { DEFAULT_OPEN_VIEWER, DEFAULT_VIEWER, DEFAULT_WORKER, resolveOptions } from './options.js';
 import { injectStyles } from './styles.js';
 
 /**
@@ -41,4 +41,4 @@ export default function docsifyYacv(userOptions = {}) {
   };
 }
 
-export { docsifyYacv as yacv, DEFAULT_OPEN_VIEWER, DEFAULT_VIEWER };
+export { docsifyYacv as yacv, DEFAULT_OPEN_VIEWER, DEFAULT_VIEWER, DEFAULT_WORKER };

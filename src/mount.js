@@ -260,21 +260,20 @@ function createEmbed(spec, vm, options) {
   const autoLoad = pick(attrs, 'autoload') === undefined ? options.autoLoad : toBool(pick(attrs, 'autoload'), options.autoLoad);
   const runtimeMode = stringAttr(pick(attrs, 'runtime')) || options.runtime;
   const workerUrl = stringAttr(pick(attrs, 'worker', 'workerurl')) || options.workerUrl;
-  const workerMode =
-    runtimeMode === 'worker' && !!workerUrl && sameOrigin(workerUrl) && sameOrigin(viewer);
-  if (runtimeMode === 'worker' && !workerMode) {
+  const sameOriginViewer = sameOrigin(viewer);
+  const workerMode = runtimeMode === 'worker' && !!workerUrl;
+  if (runtimeMode === 'worker' && !workerUrl) {
     // eslint-disable-next-line no-console
-    console.warn(
-      '[docsify-yacv] Worker runtime requires a same-origin viewer and workerUrl; using the per-viewer runtime.',
-    );
+    console.warn('[docsify-yacv] runtime=worker requires workerUrl; using the per-viewer runtime.');
   }
-  // The shared worker has one interpreter, so it uses the page-wide settings.
-  // Per-embed version/debug/constraints require `runtime=viewer` (or a separate
-  // page/worker).
+  // Each distinct version/debug/constraints combination gets one shared
+  // interpreter; embeds with identical settings reuse it.
   const workerSettings = {
-    version: options.version,
-    debug: toBool(options.debug, false),
-    constraints: normalizeConstraints(options.constraints || ''),
+    version,
+    debug: toBool(pick(attrs, 'debug', 'pgdebug', 'pg_debug') ?? options.debug),
+    constraints: normalizeConstraints(
+      pick(attrs, 'constraints', 'pgconstraints', 'pg_constraints') ?? options.constraints,
+    ),
   };
   const lazy = pick(attrs, 'lazy') === undefined ? options.lazy : toBool(pick(attrs, 'lazy'), options.lazy);
   const chrome = pick(attrs, 'chrome') === undefined ? options.chrome : toBool(pick(attrs, 'chrome'), options.chrome);
@@ -346,6 +345,7 @@ function createEmbed(spec, vm, options) {
     lazy,
     chrome,
     workerMode,
+    sameOriginViewer,
     workerUrl,
     workerSettings,
     workerModels: null,
@@ -1159,60 +1159,154 @@ async function waitForViewerApi(iframe, timeout = 3000) {
 
 /**
  * @param {EmbedContext} ctx
- * @param {any} api
+ * @returns {string}
  */
-function applyWorkerModels(ctx, api) {
+function viewerTargetOrigin(ctx) {
+  try {
+    return new URL(ctx.viewer, document.baseURI).origin;
+  } catch {
+    return '*';
+  }
+}
+
+/**
+ * Applies worker output to the viewer, using the same-origin API when possible
+ * and the cross-origin postMessage bridge otherwise.
+ *
+ * @param {EmbedContext} ctx
+ */
+function applyWorkerModels(ctx) {
   if (!ctx.workerMode || !ctx.workerModels || !ctx.workerModels.length) return;
   const iframe = ctx.iframe;
-  const ViewerBlob = (iframe && iframe.contentWindow && iframe.contentWindow.Blob) || Blob;
+  if (!iframe || !iframe.contentWindow) return;
+
   const nextNames = new Set();
-  for (const model of ctx.workerModels) {
-    nextNames.add(model.name);
-    try {
-      // Construct the Blob in the viewer realm: a Blob created in the parent
-      // frame fails `instanceof Blob` inside the iframe and is treated as a URL.
-      api.loadMesh(new ViewerBlob([model.bytes], { type: 'model/gltf-binary' }), model.name);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('[docsify-yacv] Could not load worker model', model.name, err);
-    }
-  }
-  // Drop models from a previous run that are not part of the new result.
-  for (const name of ctx.appliedWorkerNames || []) {
-    if (!nextNames.has(name)) {
+  for (const model of ctx.workerModels) nextNames.add(model.name);
+
+  const api = ctx.sameOriginViewer ? viewerApi(iframe) : null;
+  if (api) {
+    const ViewerBlob = iframe.contentWindow.Blob || Blob;
+    for (const model of ctx.workerModels) {
       try {
-        api.removeMesh(name);
-      } catch {
-        // ignore
+        // Construct the Blob in the viewer realm: a Blob created in the parent
+        // frame fails `instanceof Blob` inside the iframe and is treated as a URL.
+        api.loadMesh(new ViewerBlob([model.bytes], { type: 'model/gltf-binary' }), model.name);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[docsify-yacv] Could not load worker model', model.name, err);
+      }
+    }
+    for (const name of ctx.appliedWorkerNames || []) {
+      if (!nextNames.has(name)) {
+        try {
+          api.removeMesh(name);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  } else {
+    // Cross-origin viewer: transfer a copy of each GLB to the bridge in
+    // viewer/index.html.
+    const target = viewerTargetOrigin(ctx);
+    for (const model of ctx.workerModels) {
+      const copy = model.bytes.slice();
+      try {
+        iframe.contentWindow.postMessage(
+          { type: 'yacv:model', name: model.name, bytes: copy.buffer },
+          target,
+          [copy.buffer],
+        );
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[docsify-yacv] Could not send worker model', model.name, err);
+      }
+    }
+    for (const name of ctx.appliedWorkerNames || []) {
+      if (!nextNames.has(name)) {
+        try {
+          iframe.contentWindow.postMessage({ type: 'yacv:remove', name }, target);
+        } catch {
+          // ignore
+        }
       }
     }
   }
+
   ctx.appliedWorkerNames = [...nextNames];
   ctx.container.setAttribute('data-yacv-worker', 'ready');
 }
 
 /**
- * Applies worker output to a freshly loaded mesh viewer. Falls back to the
- * per-viewer runtime when the same-origin viewer does not expose the API.
+ * Waits for a same-origin viewer API or a cross-origin bridge response.
+ *
+ * @param {EmbedContext} ctx
+ * @param {HTMLIFrameElement} iframe
+ * @param {number} [timeout]
+ * @returns {Promise<boolean>}
+ */
+async function waitForViewerBridge(ctx, iframe, timeout = 2500) {
+  if (ctx.sameOriginViewer) {
+    const api = await waitForViewerApi(iframe, Math.min(timeout, 1500));
+    if (api) return true;
+  }
+  const target = viewerTargetOrigin(ctx);
+  return new Promise(resolve => {
+    let done = false;
+    const finish = ok => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      window.removeEventListener('message', onMessage);
+      resolve(ok);
+    };
+    const onMessage = event => {
+      if (event.source !== iframe.contentWindow) return;
+      const data = event.data;
+      if (data && data.type === 'yacv:ready') finish(true);
+    };
+    const timer = setTimeout(() => finish(false), timeout);
+    window.addEventListener('message', onMessage);
+    try {
+      iframe.contentWindow?.postMessage({ type: 'yacv:ping' }, target);
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+/**
+ * Falls back to a Pyodide instance inside the viewer when the shared worker or
+ * its bridge cannot start (CSP, network, unsupported viewer).
+ *
+ * @param {EmbedContext} ctx
+ * @param {unknown} reason
+ */
+function fallbackToViewerRuntime(ctx, reason) {
+  if (!ctx.workerMode) return;
+  // eslint-disable-next-line no-console
+  console.warn('[docsify-yacv] Shared worker unavailable; using the per-viewer runtime:', reason);
+  ctx.workerMode = false;
+  ctx.openNeedsCode = false;
+  ctx.workerModels = null;
+  ctx.appliedWorkerNames = [];
+  reload(ctx);
+}
+
+/**
+ * Applies worker output to a freshly loaded mesh viewer.
  *
  * @param {EmbedContext} ctx
  * @param {HTMLIFrameElement} iframe
  */
 async function attachWorkerModels(ctx, iframe) {
-  const api = await waitForViewerApi(iframe, 4000);
+  const bridge = await waitForViewerBridge(ctx, iframe);
   if (ctx.iframe !== iframe) return;
-  if (!api) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      '[docsify-yacv] The viewer does not expose __b3dLiveViewer; falling back to the per-viewer runtime.',
-    );
-    ctx.workerMode = false;
-    ctx.openNeedsCode = false;
-    ctx.workerModels = null;
-    reload(ctx);
+  if (!bridge) {
+    fallbackToViewerRuntime(ctx, 'the viewer has no same-origin API or postMessage bridge');
     return;
   }
-  applyWorkerModels(ctx, api);
+  applyWorkerModels(ctx);
   if (ctx.live !== false && !ctx.workerModels && !ctx.workerPromise) {
     void startWorkerRun(ctx);
   }
@@ -1232,15 +1326,22 @@ function startWorkerRun(ctx) {
       const code = await ensureCode(ctx);
       if (!code || !code.trim()) return;
       ctx.container.setAttribute('data-yacv-worker', 'booting');
-      const models = await getWorkerRuntime(ctx.workerUrl).run(code, ctx.workerSettings);
+      const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).run(code);
       if (!ctx.workerMode) return; // fell back to the viewer runtime meanwhile
       ctx.workerModels = models;
-      ctx.container.setAttribute('data-yacv-worker', 'ready');
-      if (ctx.iframe) {
-        const api = await waitForViewerApi(ctx.iframe, 5000);
-        if (api) applyWorkerModels(ctx, api);
+      if (ctx.iframe && ctx.state === 'ready') {
+        const bridge = await waitForViewerBridge(ctx, ctx.iframe);
+        if (!bridge) {
+          fallbackToViewerRuntime(ctx, 'the viewer bridge disappeared');
+          return;
+        }
+        applyWorkerModels(ctx);
       }
     } catch (err) {
+      if (ctx.workerMode && err && err.phase === 'boot') {
+        fallbackToViewerRuntime(ctx, err);
+        return;
+      }
       ctx.container.setAttribute('data-yacv-worker', 'error');
       // eslint-disable-next-line no-console
       console.warn('[docsify-yacv] Python worker:', err);
@@ -1258,7 +1359,7 @@ function startWorkerRun(ctx) {
  */
 function warmWorkerOnIntent(ctx) {
   if (ctx.options.workerWarmup === false) return;
-  const start = () => warmWorker(ctx);
+  const start = () => warmWorker(ctx, true);
   ctx.container.addEventListener('pointerenter', start, { once: true });
   ctx.container.addEventListener('pointerdown', start, { once: true });
   ctx.container.addEventListener('focusin', start, { once: true });
@@ -1269,15 +1370,27 @@ function warmWorkerOnIntent(ctx) {
  *
  * @param {EmbedContext} ctx
  */
-let warmedWorker = '';
-function warmWorker(ctx) {
+/** @type {Set<string>} */
+const warmedWorkers = new Set();
+function warmWorker(ctx, allowSpecial = false) {
   if (!ctx.workerMode || ctx.options.workerWarmup === false) return;
+  const base = {
+    version: ctx.options.version,
+    debug: toBool(ctx.options.debug, false),
+    constraints: normalizeConstraints(ctx.options.constraints || ''),
+  };
+  const isBase =
+    base.version === ctx.workerSettings.version &&
+    base.debug === ctx.workerSettings.debug &&
+    base.constraints === ctx.workerSettings.constraints;
+  if (!allowSpecial && !isBase) return;
+
   const key = `${ctx.workerUrl}|${ctx.workerSettings.version}|${ctx.workerSettings.debug}|${ctx.workerSettings.constraints}`;
-  if (warmedWorker === key) return;
-  warmedWorker = key;
+  if (warmedWorkers.has(key)) return;
+  warmedWorkers.add(key);
   const start = () => {
-    getWorkerRuntime(ctx.workerUrl)
-      .ensure(ctx.workerSettings)
+    getWorkerRuntime(ctx.workerUrl, ctx.workerSettings)
+      .ensure()
       .catch(err => {
         ctx.container.setAttribute('data-yacv-worker', 'error');
         // eslint-disable-next-line no-console

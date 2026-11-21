@@ -299,6 +299,7 @@
 
   // src/options.js
   var DEFAULT_VIEWER = "https://gllmar.github.io/docsify-yacv/viewer/";
+  var DEFAULT_WORKER = "https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js";
   var DEFAULT_OPEN_VIEWER = "https://yeicor-3d.github.io/yet-another-cad-viewer/";
   var YACV_SETTING_TYPES = {
     loadHelpers: "boolean",
@@ -331,6 +332,8 @@
     openViewer: DEFAULT_OPEN_VIEWER,
     height: "480px",
     title: "",
+    /** Default poster image for preview-only embeds. */
+    poster: "",
     /** build123d version installed by the in-browser playground. */
     version: "stable",
     /** Use OCP.wasm debug wheels (better crash reports, newer dev builds). */
@@ -349,6 +352,17 @@
     lazy: true,
     /** How far before the viewport (CSS px or %) a lazy embed starts loading. */
     lazyMargin: "200px",
+    /**
+     * Shared worker by default: one interpreter per version/debug/constraints
+     * combination, across all live embeds. Requires a viewer with the postMessage
+     * bridge (the default optimized viewer) or same-origin API; otherwise the
+     * plugin falls back to the per-viewer runtime.
+     */
+    runtime: "worker",
+    /** Worker script; may be cross-origin (wrapped in a Blob worker). */
+    workerUrl: DEFAULT_WORKER,
+    /** Pre-boot the shared worker on idle when a live embed exists. */
+    workerWarmup: true,
     /** Maximum number of iframes created at the same time. */
     maxConcurrent: 2,
     /**
@@ -571,111 +585,147 @@
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
     return bytes;
   }
+  function sameOrigin(url) {
+    try {
+      return new URL(url, document.baseURI).origin === window.location.origin;
+    } catch {
+      return false;
+    }
+  }
+  var workerScripts = /* @__PURE__ */ new Map();
+  async function workerScriptUrl(url) {
+    if (sameOrigin(url)) return url;
+    if (!workerScripts.has(url)) {
+      const promise = fetch(url, { mode: "cors" }).then((response) => {
+        if (!response.ok) throw new Error(`Failed to fetch the Python worker (HTTP ${response.status})`);
+        return response.text();
+      }).then((text) => URL.createObjectURL(new Blob([text], { type: "text/javascript" })));
+      promise.catch(() => workerScripts.delete(url));
+      workerScripts.set(url, promise);
+    }
+    return workerScripts.get(url);
+  }
   var WorkerRuntime = class {
     /**
-     * @param {string} url Same-origin worker script URL.
+     * @param {string} url Worker script URL (same- or cross-origin).
+     * @param {{ version: string, debug: boolean, constraints: string }} settings
      */
-    constructor(url) {
+    constructor(url, settings) {
       this.url = url;
+      this.settings = { ...settings };
+      this.startupUrl = new URL("PlaygroundStartup.py", new URL(url, document.baseURI)).href;
       this.worker = null;
-      this.key = "";
       this.ready = null;
       this.runId = 0;
       this.pending = /* @__PURE__ */ new Map();
       this.chain = Promise.resolve();
     }
     /**
-     * @param {{ version: string, debug: boolean, constraints: string }} settings
+     * Boots the worker. Rejects with `error.phase = "boot"` when the worker or
+     * bootstrap cannot start (so the caller can fall back to the per-viewer
+     * runtime).
+     *
      * @returns {Promise<void>}
      */
-    ensure(settings) {
-      const key = `${settings.version}|${settings.debug ? 1 : 0}|${settings.constraints}`;
-      if (this.worker && this.key === key && this.ready) return this.ready;
-      this.dispose();
-      this.key = key;
-      this.worker = new Worker(this.url, { type: "module" });
-      this.ready = new Promise((resolve, reject) => {
-        const worker = (
-          /** @type {Worker} */
-          this.worker
-        );
-        let settled = false;
-        const timer = setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          reject(new Error("Python worker bootstrap timed out"));
-          this.dispose();
-        }, 24e4);
-        worker.onmessage = (event) => {
-          const message = event.data || {};
-          if (message.type === "ready") {
+    ensure() {
+      if (this.worker && this.ready) return this.ready;
+      if (this.worker) this.dispose();
+      const ready = (async () => {
+        const scriptUrl = await workerScriptUrl(this.url);
+        const worker = new Worker(scriptUrl, { type: "module" });
+        this.worker = worker;
+        await new Promise((resolve, reject) => {
+          let settled = false;
+          const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            const error = new Error("Python worker bootstrap timed out");
+            error.phase = "boot";
+            reject(error);
+          }, 24e4);
+          worker.onmessage = (event) => {
+            const message = event.data || {};
+            if (message.type === "ready") {
+              if (!settled) {
+                settled = true;
+                clearTimeout(timer);
+                resolve();
+              }
+              return;
+            }
+            if (message.type === "result" || message.type === "error") {
+              const entry = this.pending.get(message.id);
+              if (!entry) return;
+              this.pending.delete(message.id);
+              if (message.type === "error") {
+                const error = new Error(message.error || "Python worker error");
+                error.phase = "run";
+                entry.reject(error);
+                return;
+              }
+              const models = [];
+              for (const model of message.models || []) {
+                try {
+                  const bytes = decodeBase64(String(model.data || ""));
+                  models.push({
+                    name: String(model.name || "model"),
+                    hash: model.hash == null ? null : String(model.hash),
+                    bytes
+                  });
+                } catch {
+                }
+              }
+              entry.resolve(models);
+              return;
+            }
+            if (message.type === "boot-error" && !settled) {
+              settled = true;
+              clearTimeout(timer);
+              const error = new Error(message.error || "Python worker bootstrap failed");
+              error.phase = "boot";
+              reject(error);
+            }
+          };
+          worker.onerror = (event) => {
+            const error = new Error(event.message || "Python worker failed");
+            error.phase = "boot";
             if (!settled) {
               settled = true;
               clearTimeout(timer);
-              resolve();
+              reject(error);
             }
-            return;
-          }
-          if (message.type === "result" || message.type === "error") {
-            const entry = this.pending.get(message.id);
-            if (!entry) return;
-            this.pending.delete(message.id);
-            if (message.type === "error") {
-              entry.reject(new Error(message.error || "Python worker error"));
-              return;
-            }
-            const models = [];
-            for (const model of message.models || []) {
-              try {
-                const bytes = decodeBase64(String(model.data || ""));
-                models.push({
-                  name: String(model.name || "model"),
-                  hash: model.hash == null ? null : String(model.hash),
-                  bytes
-                });
-              } catch {
-              }
-            }
-            entry.resolve(models);
-            return;
-          }
-          if (message.type === "boot-error" && !settled) {
-            settled = true;
-            clearTimeout(timer);
-            reject(new Error(message.error || "Python worker bootstrap failed"));
+            this.failAll(error);
             this.dispose();
-          }
-        };
-        worker.onerror = (event) => {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timer);
-            reject(new Error(event.message || "Python worker failed to start"));
-          }
-          this.failAll(new Error(event.message || "Python worker failed"));
-          this.dispose();
-        };
-        worker.postMessage({
-          type: "init",
-          version: settings.version,
-          debug: settings.debug,
-          constraints: settings.constraints
+          };
+          worker.postMessage({
+            type: "init",
+            version: this.settings.version,
+            debug: this.settings.debug,
+            constraints: this.settings.constraints,
+            startupUrl: this.startupUrl
+          });
         });
+      })();
+      this.ready = ready.catch((error) => {
+        const err = error instanceof Error ? error : new Error(String(error));
+        if (!err.phase) err.phase = "boot";
+        this.failAll(err);
+        this.dispose();
+        throw err;
       });
       this.ready.catch(() => {
       });
       return this.ready;
     }
     /**
-     * Runs one snippet. Runs are serialized through the shared interpreter.
+     * Runs one snippet. Runs are serialized through this interpreter.
      *
      * @param {string} code
-     * @param {{ version: string, debug: boolean, constraints: string }} settings
      * @returns {Promise<WorkerModel[]>}
      */
-    run(code, settings) {
+    run(code) {
       const job = this.chain.then(async () => {
-        await this.ensure(settings);
+        await this.ensure();
         const worker = this.worker;
         if (!worker) throw new Error("Python worker is not available");
         const id = ++this.runId;
@@ -705,17 +755,21 @@
       }
       this.worker = null;
       this.ready = null;
-      this.key = "";
       this.failAll(new Error("Python worker restarted"));
     }
   };
-  var shared = null;
-  function getWorkerRuntime(url) {
-    if (!shared || shared.url !== url) {
-      shared?.dispose();
-      shared = new WorkerRuntime(url);
+  var runtimes = /* @__PURE__ */ new Map();
+  function settingsKey(settings) {
+    return `${settings.version}|${settings.debug ? 1 : 0}|${settings.constraints}`;
+  }
+  function getWorkerRuntime(url, settings) {
+    const key = `${url}|${settingsKey(settings)}`;
+    let runtime = runtimes.get(key);
+    if (!runtime) {
+      runtime = new WorkerRuntime(url, settings);
+      runtimes.set(key, runtime);
     }
-    return shared;
+    return runtime;
   }
 
   // src/mount.js
@@ -864,7 +918,7 @@
     }
     finishSetup(ctx);
   }
-  function sameOrigin(url) {
+  function sameOrigin2(url) {
     try {
       return new URL(url, document.baseURI).origin === window.location.origin;
     } catch {
@@ -884,16 +938,17 @@
     const autoLoad = pick(attrs, "autoload") === void 0 ? options.autoLoad : toBool(pick(attrs, "autoload"), options.autoLoad);
     const runtimeMode = stringAttr(pick(attrs, "runtime")) || options.runtime;
     const workerUrl = stringAttr(pick(attrs, "worker", "workerurl")) || options.workerUrl;
-    const workerMode = runtimeMode === "worker" && !!workerUrl && sameOrigin(workerUrl) && sameOrigin(viewer);
-    if (runtimeMode === "worker" && !workerMode) {
-      console.warn(
-        "[docsify-yacv] Worker runtime requires a same-origin viewer and workerUrl; using the per-viewer runtime."
-      );
+    const sameOriginViewer = sameOrigin2(viewer);
+    const workerMode = runtimeMode === "worker" && !!workerUrl;
+    if (runtimeMode === "worker" && !workerUrl) {
+      console.warn("[docsify-yacv] runtime=worker requires workerUrl; using the per-viewer runtime.");
     }
     const workerSettings = {
-      version: options.version,
-      debug: toBool(options.debug, false),
-      constraints: normalizeConstraints(options.constraints || "")
+      version,
+      debug: toBool(pick(attrs, "debug", "pgdebug", "pg_debug") ?? options.debug),
+      constraints: normalizeConstraints(
+        pick(attrs, "constraints", "pgconstraints", "pg_constraints") ?? options.constraints
+      )
     };
     const lazy = pick(attrs, "lazy") === void 0 ? options.lazy : toBool(pick(attrs, "lazy"), options.lazy);
     const chrome = pick(attrs, "chrome") === void 0 ? options.chrome : toBool(pick(attrs, "chrome"), options.chrome);
@@ -957,6 +1012,7 @@
       lazy,
       chrome,
       workerMode,
+      sameOriginViewer,
       workerUrl,
       workerSettings,
       workerModels: null,
@@ -1532,44 +1588,109 @@
     }
     return null;
   }
-  function applyWorkerModels(ctx, api) {
+  function viewerTargetOrigin(ctx) {
+    try {
+      return new URL(ctx.viewer, document.baseURI).origin;
+    } catch {
+      return "*";
+    }
+  }
+  function applyWorkerModels(ctx) {
     if (!ctx.workerMode || !ctx.workerModels || !ctx.workerModels.length) return;
     const iframe = ctx.iframe;
-    const ViewerBlob = iframe && iframe.contentWindow && iframe.contentWindow.Blob || Blob;
+    if (!iframe || !iframe.contentWindow) return;
     const nextNames = /* @__PURE__ */ new Set();
-    for (const model of ctx.workerModels) {
-      nextNames.add(model.name);
-      try {
-        api.loadMesh(new ViewerBlob([model.bytes], { type: "model/gltf-binary" }), model.name);
-      } catch (err) {
-        console.warn("[docsify-yacv] Could not load worker model", model.name, err);
-      }
-    }
-    for (const name of ctx.appliedWorkerNames || []) {
-      if (!nextNames.has(name)) {
+    for (const model of ctx.workerModels) nextNames.add(model.name);
+    const api = ctx.sameOriginViewer ? viewerApi(iframe) : null;
+    if (api) {
+      const ViewerBlob = iframe.contentWindow.Blob || Blob;
+      for (const model of ctx.workerModels) {
         try {
-          api.removeMesh(name);
-        } catch {
+          api.loadMesh(new ViewerBlob([model.bytes], { type: "model/gltf-binary" }), model.name);
+        } catch (err) {
+          console.warn("[docsify-yacv] Could not load worker model", model.name, err);
+        }
+      }
+      for (const name of ctx.appliedWorkerNames || []) {
+        if (!nextNames.has(name)) {
+          try {
+            api.removeMesh(name);
+          } catch {
+          }
+        }
+      }
+    } else {
+      const target = viewerTargetOrigin(ctx);
+      for (const model of ctx.workerModels) {
+        const copy = model.bytes.slice();
+        try {
+          iframe.contentWindow.postMessage(
+            { type: "yacv:model", name: model.name, bytes: copy.buffer },
+            target,
+            [copy.buffer]
+          );
+        } catch (err) {
+          console.warn("[docsify-yacv] Could not send worker model", model.name, err);
+        }
+      }
+      for (const name of ctx.appliedWorkerNames || []) {
+        if (!nextNames.has(name)) {
+          try {
+            iframe.contentWindow.postMessage({ type: "yacv:remove", name }, target);
+          } catch {
+          }
         }
       }
     }
     ctx.appliedWorkerNames = [...nextNames];
     ctx.container.setAttribute("data-yacv-worker", "ready");
   }
+  async function waitForViewerBridge(ctx, iframe, timeout = 2500) {
+    if (ctx.sameOriginViewer) {
+      const api = await waitForViewerApi(iframe, Math.min(timeout, 1500));
+      if (api) return true;
+    }
+    const target = viewerTargetOrigin(ctx);
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        resolve(ok);
+      };
+      const onMessage = (event) => {
+        if (event.source !== iframe.contentWindow) return;
+        const data = event.data;
+        if (data && data.type === "yacv:ready") finish(true);
+      };
+      const timer = setTimeout(() => finish(false), timeout);
+      window.addEventListener("message", onMessage);
+      try {
+        iframe.contentWindow?.postMessage({ type: "yacv:ping" }, target);
+      } catch {
+        finish(false);
+      }
+    });
+  }
+  function fallbackToViewerRuntime(ctx, reason) {
+    if (!ctx.workerMode) return;
+    console.warn("[docsify-yacv] Shared worker unavailable; using the per-viewer runtime:", reason);
+    ctx.workerMode = false;
+    ctx.openNeedsCode = false;
+    ctx.workerModels = null;
+    ctx.appliedWorkerNames = [];
+    reload(ctx);
+  }
   async function attachWorkerModels(ctx, iframe) {
-    const api = await waitForViewerApi(iframe, 4e3);
+    const bridge = await waitForViewerBridge(ctx, iframe);
     if (ctx.iframe !== iframe) return;
-    if (!api) {
-      console.warn(
-        "[docsify-yacv] The viewer does not expose __b3dLiveViewer; falling back to the per-viewer runtime."
-      );
-      ctx.workerMode = false;
-      ctx.openNeedsCode = false;
-      ctx.workerModels = null;
-      reload(ctx);
+    if (!bridge) {
+      fallbackToViewerRuntime(ctx, "the viewer has no same-origin API or postMessage bridge");
       return;
     }
-    applyWorkerModels(ctx, api);
+    applyWorkerModels(ctx);
     if (ctx.live !== false && !ctx.workerModels && !ctx.workerPromise) {
       void startWorkerRun(ctx);
     }
@@ -1581,15 +1702,22 @@
         const code = await ensureCode(ctx);
         if (!code || !code.trim()) return;
         ctx.container.setAttribute("data-yacv-worker", "booting");
-        const models = await getWorkerRuntime(ctx.workerUrl).run(code, ctx.workerSettings);
+        const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).run(code);
         if (!ctx.workerMode) return;
         ctx.workerModels = models;
-        ctx.container.setAttribute("data-yacv-worker", "ready");
-        if (ctx.iframe) {
-          const api = await waitForViewerApi(ctx.iframe, 5e3);
-          if (api) applyWorkerModels(ctx, api);
+        if (ctx.iframe && ctx.state === "ready") {
+          const bridge = await waitForViewerBridge(ctx, ctx.iframe);
+          if (!bridge) {
+            fallbackToViewerRuntime(ctx, "the viewer bridge disappeared");
+            return;
+          }
+          applyWorkerModels(ctx);
         }
       } catch (err) {
+        if (ctx.workerMode && err && err.phase === "boot") {
+          fallbackToViewerRuntime(ctx, err);
+          return;
+        }
         ctx.container.setAttribute("data-yacv-worker", "error");
         console.warn("[docsify-yacv] Python worker:", err);
       } finally {
@@ -1600,19 +1728,26 @@
   }
   function warmWorkerOnIntent(ctx) {
     if (ctx.options.workerWarmup === false) return;
-    const start = () => warmWorker(ctx);
+    const start = () => warmWorker(ctx, true);
     ctx.container.addEventListener("pointerenter", start, { once: true });
     ctx.container.addEventListener("pointerdown", start, { once: true });
     ctx.container.addEventListener("focusin", start, { once: true });
   }
-  var warmedWorker = "";
-  function warmWorker(ctx) {
+  var warmedWorkers = /* @__PURE__ */ new Set();
+  function warmWorker(ctx, allowSpecial = false) {
     if (!ctx.workerMode || ctx.options.workerWarmup === false) return;
+    const base = {
+      version: ctx.options.version,
+      debug: toBool(ctx.options.debug, false),
+      constraints: normalizeConstraints(ctx.options.constraints || "")
+    };
+    const isBase = base.version === ctx.workerSettings.version && base.debug === ctx.workerSettings.debug && base.constraints === ctx.workerSettings.constraints;
+    if (!allowSpecial && !isBase) return;
     const key = `${ctx.workerUrl}|${ctx.workerSettings.version}|${ctx.workerSettings.debug}|${ctx.workerSettings.constraints}`;
-    if (warmedWorker === key) return;
-    warmedWorker = key;
+    if (warmedWorkers.has(key)) return;
+    warmedWorkers.add(key);
     const start = () => {
-      getWorkerRuntime(ctx.workerUrl).ensure(ctx.workerSettings).catch((err) => {
+      getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).ensure().catch((err) => {
         ctx.container.setAttribute("data-yacv-worker", "error");
         console.warn("[docsify-yacv] Python worker warmup failed:", err);
       });

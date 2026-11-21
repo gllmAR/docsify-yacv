@@ -42,7 +42,7 @@ async function boot(options) {
   pyodide.globals.set("_pg_debug", !!options.debug);
   pyodide.globals.set("_pg_constraints", options.constraints || "");
   pyodide.globals.set("_pg_yacv_wheel_url", "");
-  const startupUrl = new URL("PlaygroundStartup.py", self.location.href).href;
+  const startupUrl = options.startupUrl || new URL("PlaygroundStartup.py", self.location.href).href;
   const response = await fetch(startupUrl);
   if (!response.ok) throw new Error("could not fetch " + startupUrl + " (HTTP " + response.status + ")");
   await pyodide.runPythonAsync(await response.text());
