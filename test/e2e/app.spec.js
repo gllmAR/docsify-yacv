@@ -162,6 +162,19 @@ test.describe('docsify-yacv', () => {
     await expect(page.locator('.yacv-code', { hasText: 'show(Box(5, 5, 5))' })).toBeVisible();
   });
 
+  test('shows a poster immediately and loads the viewer on intent', async ({ page }) => {
+    await page.goto('/#/poster');
+    const embed = page.locator('.yacv-embed');
+    await expect(embed).toHaveCount(1);
+    const poster = embed.locator('.yacv-poster');
+    await expect(poster).toBeVisible();
+    await expect(embed.locator('iframe')).toHaveCount(0);
+
+    await embed.evaluate(el => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    await expect(embed.locator('iframe')).toHaveCount(1);
+    await expect(poster).toBeHidden();
+  });
+
   test('lazy-loads iframes when scrolled into view', async ({ page }) => {
     await page.goto('/#/lazy');
     await expect(page.locator('.yacv-embed')).toHaveCount(1);

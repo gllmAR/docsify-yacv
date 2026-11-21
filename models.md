@@ -129,7 +129,7 @@ let you pin the viewer version. You can also override the viewer for a single em
 A single embed can do both: the static models appear immediately, and the playground output is
 added when the Python code finishes running.
 
-```build123d height=440 title="Static preview + live playground" src="assets/cube.glb"
+```build123d height=440 title="Static preview + live playground" src="assets/cube.glb" preview="assets/previews/live.glb#name=live"
 from build123d import *
 
 with BuildPart() as live:

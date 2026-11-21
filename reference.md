@@ -36,6 +36,7 @@ window.$docsify = {
 | `workerWarmup` | `boolean`           | `true`                                           | Pre-boot the shared worker on idle. |
 | `height`       | `number \| string`  | `480px`                                          | Default viewer height. Numbers are pixels; `auto` uses a 4:3 area. |
 | `title`        | `string`            | `''`                                             | Default toolbar title. |
+| `poster`       | `string`            | `''`                                             | Poster image for preview-only (`auto-load=false`) embeds. |
 | `version`      | `string`            | `stable`                                         | build123d version for live code (`stable`, `0.9.1`, `dev`, `pull/123/head`, ...). |
 | `debug`        | `boolean`           | `false`                                          | Use OCP.wasm debug wheels. |
 | `constraints`  | `string`            | `''`                                             | Pip constraints for the sandbox, newline or `;` separated, or a JSON mapping. |
@@ -77,6 +78,7 @@ show(Box(10, 10, 10))
 | `code-src`        |                            | External `.py` file to execute (instead of inline code). |
 | `models`          | `src`, `preload`          | Static model URL(s) to load, comma separated. |
 | `preview`         |                           | Static GLB shown while live code boots (use `#name=<variable>` to let yacv replace it). |
+| `poster`          |                           | Image shown instantly for preview-only embeds; hover/tap loads the viewer. |
 | `lazy`            |                            | Override the global lazy setting. |
 | `auto-load`       | `autoload`                 | Override the global auto-load setting. |
 | `chrome`          |                            | Override the global toolbar setting. |
@@ -226,6 +228,17 @@ Requirements and limits:
 - `workerWarmup: true` (default) pre-boots on idle for auto-load live embeds; preview-only
   embeds warm on pointer/focus intent so `auto-load=false` is respected; `false` disables it;
 - `maxLiveConcurrent` is ignored in worker mode.
+
+## Posters
+
+For preview-only embeds, a `poster` image is shown immediately instead of loading the viewer app.
+Hovering, tapping, focusing, or clicking **Run build123d** loads the interactive viewer (and warms
+the worker). This makes the first model paint effectively instant on slow connections:
+
+```markdown
+```build123d preview="assets/part.glb#name=part" poster="assets/part.png" auto-load=false
+```
+```
 
 ## Time to interactive
 

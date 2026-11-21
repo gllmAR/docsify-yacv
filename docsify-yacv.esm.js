@@ -409,6 +409,7 @@ function resolveOptions(userOptions = {}, vm = null) {
   merged.openInNewTab = toBool(merged.openInNewTab, true);
   merged.height = merged.height == null || merged.height === "" ? DEFAULT_OPTIONS.height : merged.height;
   merged.title = merged.title == null ? "" : String(merged.title);
+  merged.poster = merged.poster == null ? "" : String(merged.poster);
   merged.viewer = merged.viewer == null || merged.viewer === "" ? DEFAULT_VIEWER : String(merged.viewer);
   merged.openViewer = merged.openViewer == null || merged.openViewer === "" ? DEFAULT_OPEN_VIEWER : String(merged.openViewer);
   merged.editorExplicit = Object.prototype.hasOwnProperty.call(fromConfig, "editor") || Object.prototype.hasOwnProperty.call(own, "editor");
@@ -875,6 +876,7 @@ function createEmbed(spec, vm, options) {
   const base = resolveBase(options, vm);
   const height = cssSize(pick(attrs, "height") ?? options.height, "480px");
   const title = stringAttr(pick(attrs, "title")) || options.title || "";
+  const poster = stringAttr(pick(attrs, "poster")) || options.poster || "";
   const viewer = stringAttr(pick(attrs, "viewer")) || options.viewer;
   const openViewer = stringAttr(pick(attrs, "openviewer")) || options.openViewer || viewer;
   const version = stringAttr(pick(attrs, "version", "b3dversion", "pgversion", "pg_version")) || options.version;
@@ -948,6 +950,8 @@ function createEmbed(spec, vm, options) {
     showCode: !!spec.showCode,
     placeholder: null,
     title,
+    poster,
+    posterEl: null,
     version,
     autoLoad,
     lazy,
@@ -993,8 +997,37 @@ function finishSetup(ctx) {
     if (ctx.chrome && ctx.hasCode && hasStaticModels(ctx)) {
       ctx.live = false;
       addRunButton(ctx);
-      if (ctx.workerMode && ctx.hasCode) warmWorkerOnIntent(ctx);
-      scheduleLoad(ctx, "The preview loads when it becomes visible.");
+      if (ctx.poster) {
+        const poster = el("img", "yacv-poster");
+        poster.src = resolveUrl(ctx.poster, ctx.base);
+        poster.alt = ctx.title ? `${ctx.title} preview` : "3D model preview";
+        poster.loading = "eager";
+        poster.addEventListener(
+          "error",
+          () => {
+            poster.remove();
+            ctx.posterEl = null;
+            scheduleLoad(ctx, "The preview loads when it becomes visible.");
+          },
+          { once: true }
+        );
+        ctx.posterEl = poster;
+        ctx.stage.appendChild(poster);
+        const load2 = () => enqueueLoad(ctx, true);
+        ctx.container.addEventListener("pointerenter", load2, { once: true });
+        ctx.container.addEventListener("pointerdown", load2, { once: true });
+        ctx.container.addEventListener("focusin", load2, { once: true });
+      } else {
+        scheduleLoad(ctx, "The preview loads when it becomes visible.");
+      }
+      if (ctx.workerMode && ctx.hasCode) {
+        warmWorkerOnIntent(ctx);
+        setTimeout(() => {
+          if (ctx.workerMode && ctx.live === false && ctx.stage.isConnected && !ctx.workerPromise && !ctx.workerModels) {
+            warmWorker(ctx);
+          }
+        }, 1500);
+      }
       return;
     }
     showPlaceholder(ctx, {
@@ -1073,6 +1106,7 @@ function unload(ctx) {
   ctx.openUrl = null;
   ctx.loading = null;
   ctx.pendingUnload = false;
+  if (ctx.posterEl) ctx.posterEl.hidden = false;
   if (typeof IntersectionObserver === "undefined") {
     enqueueLoad(ctx);
   } else {
@@ -1352,10 +1386,18 @@ function load(ctx, slot = ctx.activeSlotId) {
           unload(ctx);
           return;
         }
+        if (ctx.posterEl) ctx.posterEl.hidden = true;
         if (ctx.workerMode) {
           setState(ctx, "ready");
           clearPlaceholder(ctx);
           void attachWorkerModels(ctx, iframe);
+          if (ctx.live === false && !ctx.workerModels) {
+            setTimeout(() => {
+              if (ctx.workerMode && ctx.live === false && ctx.stage.isConnected && !ctx.workerPromise && !ctx.workerModels) {
+                warmWorker(ctx);
+              }
+            }, 1500);
+          }
           return;
         }
         startLiveHold(ctx);
@@ -1953,9 +1995,24 @@ var CSS = `
   background: #7f7f7f;
 }
 
+.yacv-poster {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #b3b3b3;
+  cursor: pointer;
+  display: block;
+}
+
+.yacv-poster[hidden] { display: none; }
+
 .yacv-placeholder {
   position: absolute;
   inset: 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;

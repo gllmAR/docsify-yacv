@@ -138,9 +138,24 @@ export const CSS = `
   background: #7f7f7f;
 }
 
+.yacv-poster {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #b3b3b3;
+  cursor: pointer;
+  display: block;
+}
+
+.yacv-poster[hidden] { display: none; }
+
 .yacv-placeholder {
   position: absolute;
   inset: 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;

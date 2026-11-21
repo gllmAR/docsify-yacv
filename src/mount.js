@@ -246,6 +246,7 @@ function createEmbed(spec, vm, options) {
   const base = resolveBase(options, vm);
   const height = cssSize(pick(attrs, 'height') ?? options.height, '480px');
   const title = stringAttr(pick(attrs, 'title')) || options.title || '';
+  const poster = stringAttr(pick(attrs, 'poster')) || options.poster || '';
   const viewer = stringAttr(pick(attrs, 'viewer')) || options.viewer;
   const openViewer = stringAttr(pick(attrs, 'openviewer')) || options.openViewer || viewer;
   const version =
@@ -338,6 +339,8 @@ function createEmbed(spec, vm, options) {
     showCode: !!spec.showCode,
     placeholder: null,
     title,
+    poster,
+    posterEl: null,
     version,
     autoLoad,
     lazy,
@@ -406,8 +409,49 @@ function finishSetup(ctx) {
     if (ctx.chrome && ctx.hasCode && hasStaticModels(ctx)) {
       ctx.live = false;
       addRunButton(ctx);
-      if (ctx.workerMode && ctx.hasCode) warmWorkerOnIntent(ctx);
-      scheduleLoad(ctx, 'The preview loads when it becomes visible.');
+
+      if (ctx.poster) {
+        // Show a pre-rendered poster instantly; load the interactive viewer
+        // only on intent (hover/tap/focus) or when Run is pressed.
+        const poster = el('img', 'yacv-poster');
+        poster.src = resolveUrl(ctx.poster, ctx.base);
+        poster.alt = ctx.title ? `${ctx.title} preview` : '3D model preview';
+        poster.loading = 'eager';
+        poster.addEventListener(
+          'error',
+          () => {
+            poster.remove();
+            ctx.posterEl = null;
+            scheduleLoad(ctx, 'The preview loads when it becomes visible.');
+          },
+          { once: true },
+        );
+        ctx.posterEl = poster;
+        ctx.stage.appendChild(poster);
+        const load = () => enqueueLoad(ctx, true);
+        ctx.container.addEventListener('pointerenter', load, { once: true });
+        ctx.container.addEventListener('pointerdown', load, { once: true });
+        ctx.container.addEventListener('focusin', load, { once: true });
+      } else {
+        scheduleLoad(ctx, 'The preview loads when it becomes visible.');
+      }
+
+      if (ctx.workerMode && ctx.hasCode) {
+        warmWorkerOnIntent(ctx);
+        // The poster/preview is already visible; pre-boot shortly after so
+        // the first Run does not wait for the whole sandbox.
+        setTimeout(() => {
+          if (
+            ctx.workerMode &&
+            ctx.live === false &&
+            ctx.stage.isConnected &&
+            !ctx.workerPromise &&
+            !ctx.workerModels
+          ) {
+            warmWorker(ctx);
+          }
+        }, 1500);
+      }
       return;
     }
     showPlaceholder(ctx, {
@@ -524,6 +568,7 @@ function unload(ctx) {
   ctx.openUrl = null;
   ctx.loading = null;
   ctx.pendingUnload = false;
+  if (ctx.posterEl) ctx.posterEl.hidden = false;
 
   // Reload when it comes back near the viewport (even if `lazy` is false).
   if (typeof IntersectionObserver === 'undefined') {
@@ -912,10 +957,26 @@ function load(ctx, slot = ctx.activeSlotId) {
           unload(ctx);
           return;
         }
+        if (ctx.posterEl) ctx.posterEl.hidden = true;
         if (ctx.workerMode) {
           setState(ctx, 'ready');
           clearPlaceholder(ctx);
           void attachWorkerModels(ctx, iframe);
+          // Once the preview is visible, pre-boot the shared worker so the
+          // first Run is fast. workerWarmup=false disables this.
+          if (ctx.live === false && !ctx.workerModels) {
+            setTimeout(() => {
+              if (
+                ctx.workerMode &&
+                ctx.live === false &&
+                ctx.stage.isConnected &&
+                !ctx.workerPromise &&
+                !ctx.workerModels
+              ) {
+                warmWorker(ctx);
+              }
+            }, 1500);
+          }
           return;
         }
         startLiveHold(ctx);

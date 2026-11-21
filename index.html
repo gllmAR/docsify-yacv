@@ -8,6 +8,12 @@
       name="description"
       content="Yet Another CAD Viewer plugin for docsify with live in-browser build123d and static GLB/GLTF support."
     />
+    <!-- Preload the optimized viewer so the first preview does not pay an extra
+         round trip. Keep these names in sync with viewer/index.html. -->
+    <link rel="modulepreload" href="./viewer/index-D7SUI9ZY.js" crossorigin />
+    <link rel="modulepreload" href="./viewer/ModelViewerWrapper-Tuv2-Sqf.js" crossorigin />
+    <link rel="preload" as="style" href="./viewer/style-Dagxkpwx.css" />
+
     <!-- Start DNS/TLS early for docsify (jsDelivr) and the yacv viewer. The
          plugin adds hints for the PyPI/OCP origins only on pages with live code. -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />

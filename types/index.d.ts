@@ -29,6 +29,8 @@ export interface DocsifyYacvOptions {
   height?: string | number;
   /** Default title shown in the embed toolbar. */
   title?: string;
+  /** Default poster image for preview-only (`auto-load=false`) embeds. */
+  poster?: string;
   /**
    * build123d version installed by the in-browser playground.
    * `"stable"` (latest PyPI release), a version such as `"0.9.1"`, or a GitHub

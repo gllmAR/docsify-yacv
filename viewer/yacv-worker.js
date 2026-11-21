@@ -33,7 +33,7 @@ async function boot(options) {
   post({ type: "booting" });
   pyodide = await loadPyodide({
     indexURL: PYODIDE_INDEX,
-    packages: ["micropip"],
+    packages: ["micropip", "numpy", "scipy", "pillow", "requests", "packaging", "pyparsing"],
     // The bootstrap logs a lot of install progress; keep the docs console quiet.
     stdout: () => {},
     stderr: () => {},

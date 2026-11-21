@@ -172,6 +172,7 @@ export function resolveOptions(userOptions = {}, vm = null) {
   merged.openInNewTab = toBool(merged.openInNewTab, true);
   merged.height = merged.height == null || merged.height === '' ? DEFAULT_OPTIONS.height : merged.height;
   merged.title = merged.title == null ? '' : String(merged.title);
+  merged.poster = merged.poster == null ? '' : String(merged.poster);
   merged.viewer = merged.viewer == null || merged.viewer === '' ? DEFAULT_VIEWER : String(merged.viewer);
   merged.openViewer =
     merged.openViewer == null || merged.openViewer === '' ? DEFAULT_OPEN_VIEWER : String(merged.openViewer);
@@ -225,6 +226,7 @@ export function normalizeEditor(value, fallback = 0) {
  * @property {string} [openViewer] Base URL used by the "Open" action (defaults to `viewer`).
  * @property {string | number} [height] Default viewer height (number = px).
  * @property {string} [title] Default title shown in the toolbar.
+ * @property {string} [poster] Default poster image for preview-only embeds.
  * @property {string} [version] build123d version (`stable`, `0.9.1`, `dev`, `pull/123/head`, ...).
  * @property {boolean} [debug] Use OCP.wasm debug wheels.
  * @property {string} [constraints] Global pip constraints (newline separated).

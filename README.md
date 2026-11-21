@@ -5,7 +5,7 @@ viewers, powered by [Yet Another CAD Viewer](https://github.com/yeicor-3d/yet-an
 Build123d runs entirely in the reader's browser (OCP compiled to WebAssembly), so there is no
 server, no Python install and no build step.
 
-```build123d height=440 title="build123d — click Run, or Open to edit" preview="assets/preview-part.glb#name=part" auto-load=false
+```build123d height=440 title="build123d — click Run, or Open to edit" preview="assets/preview-part.glb#name=part" poster="assets/preview-part.png" auto-load=false
 from build123d import *
 
 with BuildPart() as part:
@@ -35,9 +35,9 @@ Python code block. The same Markdown works everywhere.
   button; the 3D view sits right below it.
 - **Configurable sandbox** — pin build123d versions (PyPI, branch, tag, PR), debug wheels, pip
   constraints, Monaco editor, extra packages via micropip.
-- **Fast perceived startup** — pair live code with a `preview` GLB: the model appears in ~2–3s
-  while the in-browser sandbox boots (or waits for a **Run build123d** click), then the live result
-  replaces it.
+- **Fast perceived startup** — pair live code with a `preview` GLB and (optionally) a `poster`
+  image: the model appears immediately while the sandbox boots or waits for a **Run build123d**
+  click, then the live result replaces it.
 - **Efficient with many embeds** — nearest-first load queue with capped concurrency, automatic
   unloading of far-offscreen viewers, and one viewer app per fence instead of per model.
 - **Optimized embedded viewer** — the repo ships a headless, pruned yacv build: no Monaco, drawers
@@ -139,8 +139,8 @@ Supported languages: `build123d`, `b3d`, `b123d`, `yacv-build123d`, `yacv-py`, `
 `python yacv` if you want to keep Python highlighting.
 
 Per-embed options are space separated: `height`, `title`, `version`/`b3d-version`, `debug`,
-`constraints`, `editor`, `code` (`show`/`hide`), `code-src`, `preview`, `models`/`src`, `lazy`,
-`auto-load`, `chrome`, `open`, `viewer`, plus every yacv viewer setting (`edgeWidth=2`,
+`constraints`, `editor`, `code` (`show`/`hide`), `code-src`, `preview`, `poster`, `models`/`src`,
+`lazy`, `auto-load`, `chrome`, `open`, `viewer`, plus every yacv viewer setting (`edgeWidth=2`,
 `autoplay=false`, ...).
 Values with spaces must be quoted: `title="My part"`.
 
@@ -223,6 +223,7 @@ window.$docsify = {
 | `workerWarmup` | `true` | Pre-boot the shared worker on idle when a live embed exists. |
 | `height` | `480px` | Default stage height (number = px, CSS length, or `auto`). |
 | `title` | `''` | Default toolbar title. |
+| `poster` | `''` | Poster image for preview-only (`auto-load=false`) embeds; shown instantly. |
 | `version` | `stable` | build123d version for live code. |
 | `debug` | `false` | Use OCP.wasm debug wheels. |
 | `constraints` | `''` | Pip constraints (`;`/newline separated or JSON mapping). |
@@ -294,11 +295,12 @@ Measured on the live demo with a warm browser cache (Chromium, M1-class machine)
 
 | Embed | Time until the model is visible |
 | ----- | ------------------------------- |
+| Preview with `poster` (image) | **<0.5s**; interactive viewer on hover/tap |
 | Static `yacv` model (GLB) | ~2–3s (optimized viewer), ~3s upstream |
-| Live build123d **with `preview`** | preview in ~2–3s; live geometry replaces it when the sandbox finishes |
-| Live build123d **with `preview` + `auto-load=false`** | preview in ~2–3s; sandbox starts only on **Run build123d** |
+| Live build123d **with `preview`** | preview in ~1–3s; live geometry replaces it when the sandbox finishes |
+| Live build123d **with `preview` + `auto-load=false`** | preview in ~1–3s; sandbox starts only on **Run build123d** |
 | Live build123d, optimized viewer (per-viewer runtime) | **~15s** warm cache |
-| Live build123d, shared worker, **first** example | ~20s (boot) |
+| Live build123d, shared worker, **first** example | ~12–20s boot (preview/poster visible meanwhile) |
 | Live build123d, shared worker, **later** examples | **~0.5–1s** |
 | Live build123d, upstream viewer | ~21–30s (includes Monaco) |
 

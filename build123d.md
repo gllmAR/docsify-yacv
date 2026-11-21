@@ -16,7 +16,7 @@ noticeably faster. See [performance notes](reference.md?id=performance-and-limit
 
 ## A parametric part
 
-```build123d height=420 title="Parametric flange"
+```build123d preview="assets/previews/flange.glb#name=flange" height=420 title="Parametric flange"
 from math import cos, sin, radians
 
 from build123d import *
@@ -45,7 +45,7 @@ show(flange)
 `show()` accepts several objects at once. The variable names become the model names in the yacv
 sidebar, and `obj.color = (r, g, b, a)` sets a per-object color.
 
-```build123d height=420 title="Assembly with a highlighted edge group"
+```build123d preview="assets/previews/base_part.glb#name=base_part,assets/previews/cap_part.glb#name=cap_part,assets/previews/rim.glb#name=rim" height=420 title="Assembly with a highlighted edge group"
 from build123d import *
 
 with BuildPart() as base:
@@ -74,7 +74,7 @@ show(base_part, cap_part, rim)
 The playground pre-imports `yacv_server` and mocks `ocp_vscode`, so snippets written for
 VS Code (or CQ-editor) work as-is:
 
-```build123d height=380 title="show_object() compatibility"
+```build123d preview="assets/previews/part.glb#name=part" height=380 title="show_object() compatibility"
 from build123d import *
 from ocp_vscode import show_object
 
@@ -91,7 +91,7 @@ show_object(part)
 By default the sandbox installs the latest stable build123d. Use `version` to pin a PyPI release,
 or to test a GitHub branch / tag / commit / pull request:
 
-```build123d version=dev runtime=viewer height=360 title="build123d dev branch"
+```build123d version=dev runtime=viewer preview="assets/previews/cube.glb#name=cube" height=360 title="build123d dev branch"
 from build123d import *
 
 with BuildPart() as cube:
@@ -116,12 +116,12 @@ show(cube)
 `debug` installs OCP.wasm debug wheels (newer dev builds, better crash reports; slower).
 `constraints` passes pip constraints for every package the sandbox installs:
 
-```build123d debug constraints="numpy<2;packaging>=24" runtime=viewer height=340 title="Pinned sandbox dependencies"
+```build123d debug constraints="numpy<2;packaging>=24" runtime=viewer preview="assets/previews/constraints.glb#name=constraints" height=340 title="Pinned sandbox dependencies"
 from build123d import *
 import numpy
 
 print("numpy", numpy.__version__)
-show(Box(16, 16, 4))
+show(Box(16, 16, 4), names="constraints")
 ```
 
 Multiple constraints are separated with `;` (a newline works too when using the `<yacv>` element).
@@ -150,7 +150,7 @@ By default the in-iframe Monaco editor is hidden (`editor=0`) and docsify displa
 above the viewer. Set `editor` to an opacity between `0` and `1` to show the editor instead, e.g.
 `editor=0.9`, or `editor=show`:
 
-```build123d editor=0.85 runtime=viewer viewer="https://yeicor-3d.github.io/yet-another-cad-viewer/" height=520 title="Editable sandbox inside the iframe"
+```build123d editor=0.85 runtime=viewer viewer="https://yeicor-3d.github.io/yet-another-cad-viewer/" preview="assets/previews/knob.glb#name=knob" height=520 title="Editable sandbox inside the iframe"
 from build123d import *
 
 with BuildPart() as knob:
