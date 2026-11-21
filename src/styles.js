@@ -60,6 +60,15 @@ export const CSS = `
   white-space: nowrap;
 }
 
+.yacv-worker-status {
+  font-size: 11px;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
+.yacv-worker-status:empty { display: none; }
+.yacv-worker-status[data-state="error"] { color: #c0392b; opacity: 1; }
+
 .yacv-actions {
   display: flex;
   flex: none;

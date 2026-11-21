@@ -300,6 +300,9 @@ function createEmbed(spec, vm, options) {
   }
   toolbar.appendChild(badge);
 
+  const workerStatus = el('span', 'yacv-worker-status');
+  if (workerMode) toolbar.appendChild(workerStatus);
+
   const actions = el('div', 'yacv-actions');
   toolbar.appendChild(actions);
 
@@ -345,6 +348,7 @@ function createEmbed(spec, vm, options) {
     lazy,
     chrome,
     workerMode,
+    workerStatus: workerMode ? workerStatus : null,
     sameOriginViewer,
     workerUrl,
     workerSettings,
@@ -969,7 +973,9 @@ function load(ctx, slot = ctx.activeSlotId) {
           unload(ctx);
           return;
         }
-        if (ctx.posterEl) ctx.posterEl.hidden = true;
+        if (ctx.posterEl && (!ctx.workerMode || hasStaticModels(ctx))) {
+          ctx.posterEl.hidden = true;
+        }
         if (ctx.workerMode) {
           setState(ctx, 'ready');
           clearPlaceholder(ctx);
@@ -1170,6 +1176,20 @@ function viewerTargetOrigin(ctx) {
 }
 
 /**
+ * @param {EmbedContext} ctx
+ * @param {'booting' | 'ready' | 'error' | null} state
+ */
+function setWorkerState(ctx, state) {
+  if (state) ctx.container.setAttribute('data-yacv-worker', state);
+  else ctx.container.removeAttribute('data-yacv-worker');
+  if (ctx.workerStatus) {
+    ctx.workerStatus.dataset.state = state || '';
+    ctx.workerStatus.textContent =
+      state === 'booting' ? 'Booting Python…' : state === 'error' ? 'Python failed' : '';
+  }
+}
+
+/**
  * Applies worker output to the viewer, using the same-origin API when possible
  * and the cross-origin postMessage bridge otherwise.
  *
@@ -1234,7 +1254,8 @@ function applyWorkerModels(ctx) {
   }
 
   ctx.appliedWorkerNames = [...nextNames];
-  ctx.container.setAttribute('data-yacv-worker', 'ready');
+  setWorkerState(ctx, 'ready');
+  if (ctx.posterEl) ctx.posterEl.hidden = true;
 }
 
 /**
@@ -1290,6 +1311,7 @@ function fallbackToViewerRuntime(ctx, reason) {
   ctx.openNeedsCode = false;
   ctx.workerModels = null;
   ctx.appliedWorkerNames = [];
+  setWorkerState(ctx, null);
   reload(ctx);
 }
 
@@ -1325,10 +1347,11 @@ function startWorkerRun(ctx) {
     try {
       const code = await ensureCode(ctx);
       if (!code || !code.trim()) return;
-      ctx.container.setAttribute('data-yacv-worker', 'booting');
+      setWorkerState(ctx, 'booting');
       const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).run(code);
       if (!ctx.workerMode) return; // fell back to the viewer runtime meanwhile
       ctx.workerModels = models;
+      if (!models.length) setWorkerState(ctx, 'ready');
       if (ctx.iframe && ctx.state === 'ready') {
         const bridge = await waitForViewerBridge(ctx, ctx.iframe);
         if (!bridge) {
@@ -1342,7 +1365,7 @@ function startWorkerRun(ctx) {
         fallbackToViewerRuntime(ctx, err);
         return;
       }
-      ctx.container.setAttribute('data-yacv-worker', 'error');
+      setWorkerState(ctx, 'error');
       // eslint-disable-next-line no-console
       console.warn('[docsify-yacv] Python worker:', err);
     } finally {
@@ -1392,7 +1415,7 @@ function warmWorker(ctx, allowSpecial = false) {
     getWorkerRuntime(ctx.workerUrl, ctx.workerSettings)
       .ensure()
       .catch(err => {
-        ctx.container.setAttribute('data-yacv-worker', 'error');
+        setWorkerState(ctx, 'error');
         // eslint-disable-next-line no-console
         console.warn('[docsify-yacv] Python worker warmup failed:', err);
       });

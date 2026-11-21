@@ -971,6 +971,8 @@
       badge.hidden = true;
     }
     toolbar.appendChild(badge);
+    const workerStatus = el("span", "yacv-worker-status");
+    if (workerMode) toolbar.appendChild(workerStatus);
     const actions = el("div", "yacv-actions");
     toolbar.appendChild(actions);
     const stage = el("div", "yacv-stage");
@@ -1012,6 +1014,7 @@
       lazy,
       chrome,
       workerMode,
+      workerStatus: workerMode ? workerStatus : null,
       sameOriginViewer,
       workerUrl,
       workerSettings,
@@ -1448,7 +1451,9 @@
             unload(ctx);
             return;
           }
-          if (ctx.posterEl) ctx.posterEl.hidden = true;
+          if (ctx.posterEl && (!ctx.workerMode || hasStaticModels(ctx))) {
+            ctx.posterEl.hidden = true;
+          }
           if (ctx.workerMode) {
             setState(ctx, "ready");
             clearPlaceholder(ctx);
@@ -1595,6 +1600,14 @@
       return "*";
     }
   }
+  function setWorkerState(ctx, state) {
+    if (state) ctx.container.setAttribute("data-yacv-worker", state);
+    else ctx.container.removeAttribute("data-yacv-worker");
+    if (ctx.workerStatus) {
+      ctx.workerStatus.dataset.state = state || "";
+      ctx.workerStatus.textContent = state === "booting" ? "Booting Python\u2026" : state === "error" ? "Python failed" : "";
+    }
+  }
   function applyWorkerModels(ctx) {
     if (!ctx.workerMode || !ctx.workerModels || !ctx.workerModels.length) return;
     const iframe = ctx.iframe;
@@ -1643,7 +1656,8 @@
       }
     }
     ctx.appliedWorkerNames = [...nextNames];
-    ctx.container.setAttribute("data-yacv-worker", "ready");
+    setWorkerState(ctx, "ready");
+    if (ctx.posterEl) ctx.posterEl.hidden = true;
   }
   async function waitForViewerBridge(ctx, iframe, timeout = 2500) {
     if (ctx.sameOriginViewer) {
@@ -1681,6 +1695,7 @@
     ctx.openNeedsCode = false;
     ctx.workerModels = null;
     ctx.appliedWorkerNames = [];
+    setWorkerState(ctx, null);
     reload(ctx);
   }
   async function attachWorkerModels(ctx, iframe) {
@@ -1701,10 +1716,11 @@
       try {
         const code = await ensureCode(ctx);
         if (!code || !code.trim()) return;
-        ctx.container.setAttribute("data-yacv-worker", "booting");
+        setWorkerState(ctx, "booting");
         const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).run(code);
         if (!ctx.workerMode) return;
         ctx.workerModels = models;
+        if (!models.length) setWorkerState(ctx, "ready");
         if (ctx.iframe && ctx.state === "ready") {
           const bridge = await waitForViewerBridge(ctx, ctx.iframe);
           if (!bridge) {
@@ -1718,7 +1734,7 @@
           fallbackToViewerRuntime(ctx, err);
           return;
         }
-        ctx.container.setAttribute("data-yacv-worker", "error");
+        setWorkerState(ctx, "error");
         console.warn("[docsify-yacv] Python worker:", err);
       } finally {
         ctx.workerPromise = null;
@@ -1748,7 +1764,7 @@
     warmedWorkers.add(key);
     const start = () => {
       getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).ensure().catch((err) => {
-        ctx.container.setAttribute("data-yacv-worker", "error");
+        setWorkerState(ctx, "error");
         console.warn("[docsify-yacv] Python worker warmup failed:", err);
       });
     };
@@ -2057,6 +2073,15 @@
   opacity: 0.75;
   white-space: nowrap;
 }
+
+.yacv-worker-status {
+  font-size: 11px;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
+.yacv-worker-status:empty { display: none; }
+.yacv-worker-status[data-state="error"] { color: #c0392b; opacity: 1; }
 
 .yacv-actions {
   display: flex;
