@@ -15,7 +15,9 @@ assets/cylinder.glb#name=cylinder
 <yacv models="assets/cube.glb,assets/cylinder.glb#name=cylinder" height="420" title="Two exported models"></yacv>
 ```
 
-The model list is also the fence body: one URL per line, blank lines and `#` comments ignored.
+The model list is also the fence body: one URL per line, blank lines and `#` comments ignored. Put
+**all** related models in a single fence: one viewer app is much cheaper than one iframe per model,
+and readers can toggle models in the yacv sidebar.
 URLs may be absolute, relative to the docs page, or use yacv's `#name=` fragment to control the
 name shown in the viewer.
 

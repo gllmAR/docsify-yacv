@@ -344,8 +344,17 @@
     editor: 0,
     /** Defer iframe creation until the embed scrolls into view. */
     lazy: true,
-    /** How far before the viewport (CSS px) a lazy embed starts loading. */
+    /** How far before the viewport (CSS px or %) a lazy embed starts loading. */
     lazyMargin: "200px",
+    /** Maximum number of iframes created at the same time. */
+    maxConcurrent: 2,
+    /**
+     * Remove far-offscreen iframes to free memory/CPU. `true` unloads every
+     * embed, `'static'` only non-code embeds, `false` keeps everything alive.
+     */
+    unloadOffscreen: true,
+    /** How far outside the viewport an embed is unloaded (CSS px or %). */
+    unloadMargin: "100% 0px",
     /** Load automatically. When false, a "Load 3D viewer" button is shown. */
     autoLoad: true,
     /** Show the small embed toolbar (title, code toggle, reload, open). */
@@ -370,7 +379,11 @@
     merged.constraints = merged.constraints == null ? "" : String(merged.constraints);
     merged.editor = normalizeEditor(merged.editor, 0);
     merged.lazy = toBool(merged.lazy, true);
-    merged.lazyMargin = normalizeLazyMargin(merged.lazyMargin);
+    merged.lazyMargin = normalizeMargin(merged.lazyMargin, DEFAULT_OPTIONS.lazyMargin);
+    merged.unloadMargin = normalizeMargin(merged.unloadMargin, DEFAULT_OPTIONS.unloadMargin);
+    merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
+    if (merged.unloadOffscreen === "static") merged.unloadOffscreen = "static";
+    else merged.unloadOffscreen = toBool(merged.unloadOffscreen, true);
     merged.autoLoad = toBool(merged.autoLoad, true);
     merged.chrome = toBool(merged.chrome, true);
     merged.openInNewTab = toBool(merged.openInNewTab, true);
@@ -383,12 +396,12 @@
       merged
     );
   }
-  function normalizeLazyMargin(value) {
-    if (value == null || value === "") return DEFAULT_OPTIONS.lazyMargin;
+  function normalizeMargin(value, fallback) {
+    if (value == null || value === "") return fallback;
     const s = typeof value === "number" ? `${value}px` : String(value).trim();
     if (/^\d+(\.\d+)?$/.test(s)) return `${s}px`;
     if (/^\d+(\.\d+)?(px|%)(\s+\d+(\.\d+)?(px|%)){0,3}$/.test(s)) return s;
-    return DEFAULT_OPTIONS.lazyMargin;
+    return fallback;
   }
   function normalizeEditor(value, fallback = 0) {
     if (value == null || value === "") return fallback;
@@ -534,6 +547,12 @@
   var stageContexts = /* @__PURE__ */ new WeakMap();
   var observedStages = /* @__PURE__ */ new Set();
   var observer = null;
+  var unloadObserver = null;
+  var unloadObservedStages = /* @__PURE__ */ new Set();
+  var loadQueue = [];
+  var activeContexts = /* @__PURE__ */ new Set();
+  var activeLoads = 0;
+  var maxConcurrent = 2;
   var fetchCache = /* @__PURE__ */ new Map();
   var ICONS = {
     code: "M14.6,16.6L19.2,12L14.6,7.4L16,6L22,12L16,18L14.6,16.6M9.4,16.6L4.8,12L9.4,7.4L8,6L2,12L8,18L9.4,16.6Z",
@@ -545,7 +564,9 @@
     if (typeof document === "undefined") return;
     const root = document.querySelector(".markdown-section");
     if (!root) return;
+    maxConcurrent = Math.max(1, Math.floor(options.maxConcurrent || 2));
     pruneObserver();
+    pumpQueue();
     for (const pre of Array.from(root.querySelectorAll(`pre[data-lang]:not([${PROCESSED}])`))) {
       try {
         prepareFence(pre, vm, options);
@@ -730,7 +751,15 @@
       autoLoad,
       lazy,
       chrome,
-      timer: null
+      timer: null,
+      queued: false,
+      priority: false,
+      startPromise: null,
+      resolveStart: null,
+      slotHeld: false,
+      activeSlotId: null,
+      slotSeq: 0,
+      pendingUnload: false
     };
     ctx.hasCode = hasCode;
     ctx.live = true;
@@ -749,6 +778,7 @@
     return ["models", "src", "preview", "preload"].some((key) => splitList(ctx.attrs[key]).length > 0);
   }
   function finishSetup(ctx) {
+    observeUnload(ctx);
     if (ctx.autoLoad === false) {
       if (ctx.chrome && ctx.hasCode && hasStaticModels(ctx)) {
         ctx.live = false;
@@ -758,7 +788,7 @@
       }
       showPlaceholder(ctx, {
         text: "The 3D viewer is not loaded yet.",
-        button: { label: "Load 3D viewer", onClick: () => load(ctx) }
+        button: { label: "Load 3D viewer", onClick: () => enqueueLoad(ctx, true) }
       });
       return;
     }
@@ -766,7 +796,7 @@
   }
   function scheduleLoad(ctx, text) {
     if (!ctx.lazy || typeof IntersectionObserver === "undefined") {
-      load(ctx);
+      enqueueLoad(ctx);
       return;
     }
     showPlaceholder(ctx, { text });
@@ -782,21 +812,185 @@
           observer.unobserve(entry.target);
           observedStages.delete(entry.target);
           const ctx = stageContexts.get(entry.target);
-          if (ctx) load(ctx);
+          if (ctx) enqueueLoad(ctx);
         }
       },
-      { rootMargin: options.lazyMargin || "200px 0px" }
+      { rootMargin: options.lazyMargin || "200px" }
     );
     return observer;
   }
+  function ensureUnloadObserver(options) {
+    if (unloadObserver) return unloadObserver;
+    unloadObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) continue;
+          const ctx = stageContexts.get(entry.target);
+          if (ctx) unload(ctx);
+        }
+      },
+      { rootMargin: options.unloadMargin || "200% 0px" }
+    );
+    return unloadObserver;
+  }
+  function shouldUnload(ctx) {
+    if (ctx.options.unloadOffscreen === "static") return !ctx.hasCode;
+    return ctx.options.unloadOffscreen !== false;
+  }
+  function observeUnload(ctx) {
+    if (!shouldUnload(ctx) || typeof IntersectionObserver === "undefined") return;
+    ensureUnloadObserver(ctx.options).observe(ctx.stage);
+    unloadObservedStages.add(ctx.stage);
+  }
+  function unload(ctx) {
+    removeFromQueue(ctx);
+    if (ctx.state === "loading") {
+      ctx.pendingUnload = true;
+      return;
+    }
+    if (!ctx.iframe) return;
+    if (ctx.timer) clearTimeout(ctx.timer);
+    ctx.timer = null;
+    ctx.iframe.remove();
+    ctx.iframe = null;
+    clearPlaceholder(ctx);
+    releaseSlot(ctx, ctx.activeSlotId);
+    setState(ctx, "idle");
+    ctx.url = null;
+    ctx.openUrl = null;
+    ctx.loading = null;
+    ctx.pendingUnload = false;
+    if (typeof IntersectionObserver === "undefined") {
+      enqueueLoad(ctx);
+    } else {
+      ensureObserver(ctx.options).observe(ctx.stage);
+      observedStages.add(ctx.stage);
+    }
+  }
   function pruneObserver() {
-    if (!observer) return;
-    for (const stage of Array.from(observedStages)) {
-      if (!stage.isConnected) {
-        observer.unobserve(stage);
-        observedStages.delete(stage);
+    for (const ctx of Array.from(activeContexts)) {
+      if (!ctx.stage.isConnected) {
+        releaseSlot(ctx, ctx.activeSlotId);
+        ctx.loading = null;
+        ctx.state = "idle";
       }
     }
+    if (observer) {
+      for (const stage of Array.from(observedStages)) {
+        if (!stage.isConnected) {
+          observer.unobserve(stage);
+          observedStages.delete(stage);
+        }
+      }
+    }
+    if (unloadObserver) {
+      for (const stage of Array.from(unloadObservedStages)) {
+        if (!stage.isConnected) {
+          unloadObserver.unobserve(stage);
+          unloadObservedStages.delete(stage);
+        }
+      }
+    }
+  }
+  function enqueueLoad(ctx, priority = false) {
+    if (ctx.state === "ready" || ctx.state === "loading" || ctx.state === "error") return;
+    if (ctx.queued) {
+      if (priority) {
+        const idx = loadQueue.indexOf(ctx);
+        if (idx > 0) {
+          loadQueue.splice(idx, 1);
+          loadQueue.unshift(ctx);
+        }
+        ctx.priority = true;
+      }
+      return;
+    }
+    ctx.queued = true;
+    ctx.priority = !!priority;
+    ctx.startPromise = new Promise((resolve) => {
+      ctx.resolveStart = resolve;
+    });
+    if (ctx.priority) loadQueue.unshift(ctx);
+    else loadQueue.push(ctx);
+    pumpQueue();
+  }
+  function pumpQueue() {
+    while (activeLoads < maxConcurrent && loadQueue.length > 0) {
+      const index = pickNextIndex();
+      if (index === -1) return;
+      const ctx = loadQueue.splice(index, 1)[0];
+      ctx.queued = false;
+      ctx.priority = false;
+      if (!ctx.stage.isConnected) {
+        ctx.resolveStart?.();
+        ctx.resolveStart = null;
+        ctx.startPromise = null;
+        continue;
+      }
+      activeLoads += 1;
+      activeContexts.add(ctx);
+      ctx.slotHeld = true;
+      ctx.activeSlotId = (ctx.slotSeq || 0) + 1;
+      ctx.slotSeq = ctx.activeSlotId;
+      const slot = ctx.activeSlotId;
+      ctx.resolveStart?.();
+      ctx.resolveStart = null;
+      ctx.startPromise = null;
+      load(ctx, slot);
+    }
+  }
+  function pickNextIndex() {
+    let best = -1;
+    let bestPriority = false;
+    let bestDistance = Infinity;
+    for (let i = 0; i < loadQueue.length; i += 1) {
+      const ctx = loadQueue[i];
+      if (!ctx.stage.isConnected) {
+        loadQueue.splice(i, 1);
+        i -= 1;
+        ctx.queued = false;
+        ctx.resolveStart?.();
+        ctx.resolveStart = null;
+        ctx.startPromise = null;
+        continue;
+      }
+      const isPriority = !!ctx.priority;
+      const distance = distanceToViewport(ctx.stage);
+      if (best === -1 || isPriority && !bestPriority || isPriority === bestPriority && distance < bestDistance) {
+        best = i;
+        bestPriority = isPriority;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+  function distanceToViewport(el2) {
+    try {
+      const rect = el2.getBoundingClientRect();
+      const viewportMiddle = (window.innerHeight || 0) / 2;
+      return Math.abs(rect.top + rect.height / 2 - viewportMiddle);
+    } catch {
+      return Infinity;
+    }
+  }
+  function releaseSlot(ctx, slot = null) {
+    if (!ctx.slotHeld) return;
+    if (slot != null && ctx.activeSlotId !== slot) return;
+    ctx.slotHeld = false;
+    ctx.activeSlotId = null;
+    activeContexts.delete(ctx);
+    activeLoads = Math.max(0, activeLoads - 1);
+    pumpQueue();
+  }
+  function removeFromQueue(ctx) {
+    if (!ctx.queued) return;
+    const idx = loadQueue.indexOf(ctx);
+    if (idx !== -1) loadQueue.splice(idx, 1);
+    ctx.queued = false;
+    ctx.priority = false;
+    ctx.resolveStart?.();
+    ctx.resolveStart = null;
+    ctx.startPromise = null;
   }
   function ensureCode(ctx) {
     if (ctx.inlineCode) return Promise.resolve(ctx.inlineCode);
@@ -826,9 +1020,15 @@
     promise.catch(() => fetchCache.delete(url));
     return promise;
   }
-  function load(ctx) {
-    if (ctx.state === "ready") return Promise.resolve(ctx);
-    if (ctx.loading) return ctx.loading;
+  function load(ctx, slot = ctx.activeSlotId) {
+    if (ctx.state === "ready") {
+      releaseSlot(ctx, slot);
+      return Promise.resolve(ctx);
+    }
+    if (ctx.loading) {
+      releaseSlot(ctx, slot);
+      return ctx.loading;
+    }
     setState(ctx, "loading");
     showPlaceholder(ctx, { spinner: true, text: "Loading 3D viewer\u2026" });
     const loading = (async () => {
@@ -850,6 +1050,7 @@
           createCodePanel(ctx, code);
           mountCodeToggle(ctx);
         }
+        if (slot !== ctx.activeSlotId) return ctx;
         const hasCode = !!(code && code.trim());
         if (hasCode) ensureResourceHints(ctx.viewer, true);
         const params = buildParams({
@@ -863,6 +1064,7 @@
           throw new Error("Nothing to show: add build123d code or a .glb/.gltf model.");
         }
         if (hasCode) params.set("pg_code", await encodeCode(code));
+        if (slot !== ctx.activeSlotId) return ctx;
         const url = buildViewerUrl(ctx.viewer, params);
         ctx.url = url;
         const openParams = new URLSearchParams(params);
@@ -884,14 +1086,22 @@
         );
         iframe.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
         iframe.addEventListener("load", () => {
+          releaseSlot(ctx, slot);
           if (ctx.iframe !== iframe) return;
           if (ctx.timer) clearTimeout(ctx.timer);
           ctx.timer = null;
+          if (ctx.pendingUnload) {
+            ctx.pendingUnload = false;
+            unload(ctx);
+            return;
+          }
           setState(ctx, "ready");
           clearPlaceholder(ctx);
         });
         iframe.addEventListener("error", () => {
+          releaseSlot(ctx, slot);
           if (ctx.iframe !== iframe) return;
+          ctx.pendingUnload = false;
           setState(ctx, "error");
           showPlaceholder(ctx, {
             text: "The 3D viewer failed to load. Check your connection or the viewer URL.",
@@ -901,6 +1111,7 @@
         ctx.iframe = iframe;
         ctx.stage.appendChild(iframe);
         ctx.timer = setTimeout(() => {
+          releaseSlot(ctx, slot);
           if (ctx.state === "loading") {
             showPlaceholder(ctx, {
               spinner: true,
@@ -909,6 +1120,8 @@
           }
         }, 2e4);
       } catch (err) {
+        if (slot !== ctx.activeSlotId) return ctx;
+        releaseSlot(ctx, slot);
         setState(ctx, "error");
         showPlaceholder(ctx, { text: describeError(err), error: true });
         console.warn("[docsify-yacv]", err);
@@ -1050,11 +1263,20 @@
   }
   async function ensureLoaded(ctx) {
     if (ctx.state === "ready") return;
+    if (ctx.state === "error") reload(ctx);
     if (ctx.loading) {
       await ctx.loading;
       return;
     }
-    await load(ctx);
+    enqueueLoad(ctx, true);
+    if (ctx.loading) {
+      await ctx.loading;
+      return;
+    }
+    if (ctx.startPromise) {
+      await ctx.startPromise;
+      if (ctx.loading) await ctx.loading;
+    }
   }
   function reload(ctx) {
     if (ctx.timer) clearTimeout(ctx.timer);
@@ -1063,11 +1285,15 @@
       ctx.iframe.remove();
       ctx.iframe = null;
     }
+    releaseSlot(ctx, ctx.activeSlotId);
+    removeFromQueue(ctx);
     clearPlaceholder(ctx);
     setState(ctx, "idle");
     ctx.url = null;
     ctx.openUrl = null;
-    load(ctx);
+    ctx.loading = null;
+    ctx.pendingUnload = false;
+    enqueueLoad(ctx, true);
   }
   function addCopyButton(wrap, getText) {
     const btn = el("button", "yacv-copy");

@@ -8,6 +8,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 const fixtures = path.join(here, 'fixtures');
 const port = Number(process.env.PORT || 8123);
+let slowActive = 0;
+let slowPeak = 0;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -31,6 +33,7 @@ function resolvePath(urlPath) {
   if (urlPath === '/docsify-core.css') return path.join(root, 'node_modules/docsify/dist/themes/core.min.css');
   if (urlPath === '/docsify-yacv.js') return path.join(root, 'docsify-yacv.js');
   if (urlPath === '/') return path.join(fixtures, 'index.html');
+  if (urlPath === '/viewer-stub.html') return path.join(here, 'viewer-stub.html');
 
   const clean = decodeURIComponent(urlPath.split('?')[0]);
   if (!clean || clean.includes('..')) return null;
@@ -40,6 +43,34 @@ function resolvePath(urlPath) {
 
 const server = createServer(async (req, res) => {
   const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  if (pathname === '/reset-stats') {
+    slowActive = 0;
+    slowPeak = 0;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"ok":true}');
+    return;
+  }
+  if (pathname === '/stats') {
+    res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+    res.end(JSON.stringify({ slowPeak, slowActive }));
+    return;
+  }
+  if (pathname === '/slow-viewer.html') {
+    slowActive += 1;
+    slowPeak = Math.max(slowPeak, slowActive);
+    await new Promise(resolve => setTimeout(resolve, 350));
+    try {
+      const body = await readFile(path.join(here, 'viewer-stub.html'));
+      res.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'access-control-allow-origin': '*',
+      });
+      res.end(req.method === 'HEAD' ? undefined : body);
+    } finally {
+      slowActive -= 1;
+    }
+    return;
+  }
   if (pathname === '/favicon.ico') {
     res.writeHead(204);
     res.end();

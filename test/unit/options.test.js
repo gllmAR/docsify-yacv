@@ -18,6 +18,9 @@ test('resolveOptions: defaults', () => {
   assert.equal(options.editorExplicit, false);
   assert.equal(options.lazy, true);
   assert.equal(options.lazyMargin, '200px');
+  assert.equal(options.maxConcurrent, 2);
+  assert.equal(options.unloadOffscreen, true);
+  assert.equal(options.unloadMargin, '100% 0px');
   assert.equal(options.autoLoad, true);
   assert.equal(options.chrome, true);
   assert.deepEqual(options.settings, {});
@@ -42,6 +45,16 @@ test('resolveOptions: lazyMargin accepts numbers and CSS lengths', () => {
   assert.equal(resolveOptions({ lazyMargin: '300px 0px' }).lazyMargin, '300px 0px');
   assert.equal(resolveOptions({ lazyMargin: '30vh' }).lazyMargin, '200px');
   assert.equal(resolveOptions({ lazyMargin: '' }).lazyMargin, '200px');
+});
+
+test('resolveOptions: scheduling and unloading options', () => {
+  assert.equal(resolveOptions({ maxConcurrent: 0 }).maxConcurrent, 1);
+  assert.equal(resolveOptions({ maxConcurrent: '3' }).maxConcurrent, 3);
+  assert.equal(resolveOptions({ unloadOffscreen: false }).unloadOffscreen, false);
+  assert.equal(resolveOptions({ unloadOffscreen: 'false' }).unloadOffscreen, false);
+  assert.equal(resolveOptions({ unloadOffscreen: 'static' }).unloadOffscreen, 'static');
+  assert.equal(resolveOptions({ unloadMargin: '100%' }).unloadMargin, '100%');
+  assert.equal(resolveOptions({ unloadMargin: '10vh' }).unloadMargin, '100% 0px');
 });
 
 test('resolveOptions: marks editor as explicit only when configured', () => {

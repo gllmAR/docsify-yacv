@@ -38,6 +38,9 @@ window.$docsify = {
 | `editor`       | `number \| string`  | `0`                                              | Opacity of the in-iframe Monaco editor. `0` hides it (code is shown by docsify instead); `show` = `0.9`. |
 | `lazy`         | `boolean`           | `true`                                           | Create the iframe only when the embed approaches the viewport. |
 | `lazyMargin`   | `string \| number`  | `200px`                                          | How far before the viewport a lazy embed starts loading. |
+| `maxConcurrent` | `number`           | `2`                                              | Maximum iframes created at the same time (nearest first). |
+| `unloadOffscreen` | `boolean \| 'static'` | `true`                                        | Remove far-offscreen iframes to free memory. `'static'` keeps live sandboxes alive. |
+| `unloadMargin` | `string \| number`  | `100% 0px`                                       | How far outside the viewport an embed is unloaded. |
 | `autoLoad`     | `boolean`           | `true`                                           | When `false`, show a **Load 3D viewer** button. With a `preview`/static model it instead loads the preview and shows a **Run build123d** button for the sandbox. |
 | `chrome`       | `boolean`           | `true`                                           | Show the toolbar (title, badge, code toggle, reload, open). |
 | `openInNewTab` | `boolean`           | `true`                                           | Show the **Open** action that opens the model in the full viewer. |
@@ -196,6 +199,14 @@ Practical improvements:
   (tens of MB). Later embeds on the same page/origin reuse the browser HTTP cache, but each iframe
   runs its own Pyodide instance.
 - Keep `lazy` enabled on long pages.
+- Use a single `yacv` fence with several models instead of several fences when the models belong
+  together: one viewer app, one GPU context.
+- The plugin serializes iframe creation (`maxConcurrent`, default 2, closest embed first) and
+  unloads far-offscreen viewers by default. Live embeds restart when scrolled back; use
+  `unloadOffscreen: 'static'` to keep them alive.
+- `maxConcurrent` limits iframe startup, not Pyodide concurrency: if readers scroll quickly through
+  several live embeds, eventually several sandboxes can be booting. Clearing the viewport unloads
+  them and frees memory.
 - The sandbox editor is heavy (Monaco). The default `editor=0` avoids loading it visibly, and the
   docsify code block already gives readers the source.
 - WebAssembly, `CompressionStream` and `IntersectionObserver` are required for the full experience;

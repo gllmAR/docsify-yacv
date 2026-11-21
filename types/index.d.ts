@@ -38,6 +38,15 @@ export interface DocsifyYacvOptions {
   lazy?: boolean;
   /** How far before the viewport lazy embeds start loading. Default: "200px". */
   lazyMargin?: string | number;
+  /** Maximum number of iframes created at the same time. Default: 2. */
+  maxConcurrent?: number;
+  /**
+   * Unload far-offscreen iframes to free memory/CPU. `"static"` only unloads
+   * embeds without live code. Default: true.
+   */
+  unloadOffscreen?: boolean | 'static';
+  /** How far outside the viewport an embed is unloaded. Default: "200% 0px". */
+  unloadMargin?: string | number;
   /** Load automatically. When false, a "Load 3D viewer" button is shown. */
   autoLoad?: boolean;
   /** Show the embed toolbar. Default: true. */

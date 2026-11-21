@@ -236,6 +236,34 @@ test.describe('docsify-yacv', () => {
     expect(viewerParams(after).get('pg_code')).toBe(viewerParams(before).get('pg_code'));
   });
 
+  test('limits concurrent iframe loads (maxConcurrent)', async ({ page }) => {
+    await page.request.get('/reset-stats');
+    await page.goto('/index-concurrency.html');
+    const embeds = page.locator('.yacv-embed');
+    await expect(embeds).toHaveCount(3);
+    await expect(page.locator('.yacv-embed iframe')).toHaveCount(3, { timeout: 15000 });
+    const stats = await page.evaluate(() => fetch('/stats').then(response => response.json()));
+    expect(stats.slowPeak).toBe(1);
+  });
+
+  test('unloads far-offscreen iframes and reloads them on return', async ({ page }) => {
+    await page.goto('/index-unload.html');
+    const embed = page.locator('.yacv-embed');
+    await expect(embed).toHaveCount(1);
+
+    await embed.scrollIntoViewIfNeeded();
+    await expect(embed.locator('iframe')).toHaveCount(1);
+    await expect(embed).toHaveAttribute('data-yacv-state', 'ready');
+
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await expect(embed.locator('iframe')).toHaveCount(0);
+    await expect(embed).toHaveAttribute('data-yacv-state', 'idle');
+
+    await embed.scrollIntoViewIfNeeded();
+    await expect(embed.locator('iframe')).toHaveCount(1);
+    await expect(embed).toHaveAttribute('data-yacv-state', 'ready');
+  });
+
   test('does not emit plugin errors', async ({ page }) => {
     /** @type {string[]} */
     const problems = [];

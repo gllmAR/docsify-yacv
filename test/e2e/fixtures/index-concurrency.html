@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>docsify-yacv concurrency e2e</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      window.$docsify = {
+        name: 'concurrency e2e',
+        homepage: 'multi-concurrency.md',
+        basePath: '/',
+        yacv: {
+          viewer: '/slow-viewer.html',
+          lazy: true,
+          lazyMargin: '600px',
+          maxConcurrent: 1,
+          unloadOffscreen: false,
+        },
+      };
+    </script>
+    <script src="/docsify.min.js"></script>
+    <script src="/docsify-yacv.js"></script>
+  </body>
+</html>

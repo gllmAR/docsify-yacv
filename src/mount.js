@@ -13,6 +13,18 @@ const stageContexts = new WeakMap();
 const observedStages = new Set();
 /** @type {IntersectionObserver | null} */
 let observer = null;
+/** @type {IntersectionObserver | null} */
+let unloadObserver = null;
+/** @type {Set<Element>} */
+const unloadObservedStages = new Set();
+
+/** Embeds waiting for a load slot. */
+/** @type {EmbedContext[]} */
+const loadQueue = [];
+/** @type {Set<EmbedContext>} */
+const activeContexts = new Set();
+let activeLoads = 0;
+let maxConcurrent = 2;
 
 /** @type {Map<string, Promise<string>>} */
 const fetchCache = new Map();
@@ -36,7 +48,9 @@ export function mountAll(vm, options) {
   if (typeof document === 'undefined') return;
   const root = document.querySelector('.markdown-section');
   if (!root) return;
+  maxConcurrent = Math.max(1, Math.floor(options.maxConcurrent || 2));
   pruneObserver();
+  pumpQueue();
 
   for (const pre of Array.from(root.querySelectorAll(`pre[data-lang]:not([${PROCESSED}])`))) {
     try {
@@ -291,6 +305,14 @@ function createEmbed(spec, vm, options) {
     lazy,
     chrome,
     timer: null,
+    queued: false,
+    priority: false,
+    startPromise: null,
+    resolveStart: null,
+    slotHeld: false,
+    activeSlotId: null,
+    slotSeq: 0,
+    pendingUnload: false,
   };
 
   // Models can also be provided through `models`, `preload` or `src` attrs.
@@ -329,6 +351,8 @@ function hasStaticModels(ctx) {
  * @param {EmbedContext} ctx
  */
 function finishSetup(ctx) {
+  observeUnload(ctx);
+
   if (ctx.autoLoad === false) {
     // With a static preview we can show the model immediately and only boot
     // the Python sandbox when the reader asks for it.
@@ -340,7 +364,7 @@ function finishSetup(ctx) {
     }
     showPlaceholder(ctx, {
       text: 'The 3D viewer is not loaded yet.',
-      button: { label: 'Load 3D viewer', onClick: () => load(ctx) },
+      button: { label: 'Load 3D viewer', onClick: () => enqueueLoad(ctx, true) },
     });
     return;
   }
@@ -355,7 +379,7 @@ function finishSetup(ctx) {
  */
 function scheduleLoad(ctx, text) {
   if (!ctx.lazy || typeof IntersectionObserver === 'undefined') {
-    load(ctx);
+    enqueueLoad(ctx);
     return;
   }
   showPlaceholder(ctx, { text });
@@ -375,22 +399,254 @@ function ensureObserver(options) {
         observer.unobserve(entry.target);
         observedStages.delete(entry.target);
         const ctx = stageContexts.get(entry.target);
-        if (ctx) load(ctx);
+        if (ctx) enqueueLoad(ctx);
       }
     },
-    { rootMargin: options.lazyMargin || '200px 0px' },
+    { rootMargin: options.lazyMargin || '200px' },
   );
   return observer;
 }
 
+/**
+ * @returns {IntersectionObserver}
+ */
+function ensureUnloadObserver(options) {
+  if (unloadObserver) return unloadObserver;
+  unloadObserver = new IntersectionObserver(
+    entries => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) continue;
+        const ctx = stageContexts.get(entry.target);
+        if (ctx) unload(ctx);
+      }
+    },
+    { rootMargin: options.unloadMargin || '200% 0px' },
+  );
+  return unloadObserver;
+}
+
+/**
+ * @param {EmbedContext} ctx
+ * @returns {boolean}
+ */
+function shouldUnload(ctx) {
+  if (ctx.options.unloadOffscreen === 'static') return !ctx.hasCode;
+  return ctx.options.unloadOffscreen !== false;
+}
+
+/**
+ * Starts unloading a far-away iframe once it becomes visible-independent.
+ *
+ * @param {EmbedContext} ctx
+ */
+function observeUnload(ctx) {
+  if (!shouldUnload(ctx) || typeof IntersectionObserver === 'undefined') return;
+  ensureUnloadObserver(ctx.options).observe(ctx.stage);
+  unloadObservedStages.add(ctx.stage);
+}
+
+/**
+ * Removes a far-offscreen iframe (and its Pyodide/GPU memory). It is re-created
+ * when the embed approaches the viewport again.
+ *
+ * @param {EmbedContext} ctx
+ */
+function unload(ctx) {
+  removeFromQueue(ctx);
+
+  if (ctx.state === 'loading') {
+    // `load()` is still building the URL; unload as soon as the iframe settles.
+    ctx.pendingUnload = true;
+    return;
+  }
+  if (!ctx.iframe) return;
+
+  if (ctx.timer) clearTimeout(ctx.timer);
+  ctx.timer = null;
+  ctx.iframe.remove();
+  ctx.iframe = null;
+  clearPlaceholder(ctx);
+  releaseSlot(ctx, ctx.activeSlotId);
+  setState(ctx, 'idle');
+  ctx.url = null;
+  ctx.openUrl = null;
+  ctx.loading = null;
+  ctx.pendingUnload = false;
+
+  // Reload when it comes back near the viewport (even if `lazy` is false).
+  if (typeof IntersectionObserver === 'undefined') {
+    enqueueLoad(ctx);
+  } else {
+    ensureObserver(ctx.options).observe(ctx.stage);
+    observedStages.add(ctx.stage);
+  }
+}
+
 function pruneObserver() {
-  if (!observer) return;
-  for (const stage of Array.from(observedStages)) {
-    if (!stage.isConnected) {
-      observer.unobserve(stage);
-      observedStages.delete(stage);
+  // A docsify navigation can remove iframes before their `load` event fires.
+  // Do not let those stale loads keep concurrency slots for the next page.
+  for (const ctx of Array.from(activeContexts)) {
+    if (!ctx.stage.isConnected) {
+      releaseSlot(ctx, ctx.activeSlotId);
+      ctx.loading = null;
+      ctx.state = 'idle';
     }
   }
+
+  if (observer) {
+    for (const stage of Array.from(observedStages)) {
+      if (!stage.isConnected) {
+        observer.unobserve(stage);
+        observedStages.delete(stage);
+      }
+    }
+  }
+  if (unloadObserver) {
+    for (const stage of Array.from(unloadObservedStages)) {
+      if (!stage.isConnected) {
+        unloadObserver.unobserve(stage);
+        unloadObservedStages.delete(stage);
+      }
+    }
+  }
+}
+
+/**
+ * Queues an embed for loading, respecting the concurrency limit and prioritizing
+ * the embed closest to the viewport. User-initiated loads jump the queue.
+ *
+ * @param {EmbedContext} ctx
+ * @param {boolean} [priority]
+ */
+function enqueueLoad(ctx, priority = false) {
+  if (ctx.state === 'ready' || ctx.state === 'loading' || ctx.state === 'error') return;
+  if (ctx.queued) {
+    if (priority) {
+      const idx = loadQueue.indexOf(ctx);
+      if (idx > 0) {
+        loadQueue.splice(idx, 1);
+        loadQueue.unshift(ctx);
+      }
+      ctx.priority = true;
+    }
+    return;
+  }
+  ctx.queued = true;
+  ctx.priority = !!priority;
+  ctx.startPromise = new Promise(resolve => {
+    ctx.resolveStart = resolve;
+  });
+  if (ctx.priority) loadQueue.unshift(ctx);
+  else loadQueue.push(ctx);
+  pumpQueue();
+}
+
+/**
+ * Starts queued embeds while there is a free slot.
+ *
+ * @returns {void}
+ */
+function pumpQueue() {
+  while (activeLoads < maxConcurrent && loadQueue.length > 0) {
+    const index = pickNextIndex();
+    if (index === -1) return;
+    const ctx = loadQueue.splice(index, 1)[0];
+    ctx.queued = false;
+    ctx.priority = false;
+    if (!ctx.stage.isConnected) {
+      ctx.resolveStart?.();
+      ctx.resolveStart = null;
+      ctx.startPromise = null;
+      continue;
+    }
+
+    activeLoads += 1;
+    activeContexts.add(ctx);
+    ctx.slotHeld = true;
+    ctx.activeSlotId = (ctx.slotSeq || 0) + 1;
+    ctx.slotSeq = ctx.activeSlotId;
+    const slot = ctx.activeSlotId;
+    ctx.resolveStart?.();
+    ctx.resolveStart = null;
+    ctx.startPromise = null;
+    // Intentionally not awaited: the slot is released by the iframe load event.
+    load(ctx, slot);
+  }
+}
+
+/**
+ * @returns {number} Index of the next context, or -1 when nothing is usable.
+ */
+function pickNextIndex() {
+  let best = -1;
+  let bestPriority = false;
+  let bestDistance = Infinity;
+  for (let i = 0; i < loadQueue.length; i += 1) {
+    const ctx = loadQueue[i];
+    if (!ctx.stage.isConnected) {
+      loadQueue.splice(i, 1);
+      i -= 1;
+      ctx.queued = false;
+      ctx.resolveStart?.();
+      ctx.resolveStart = null;
+      ctx.startPromise = null;
+      continue;
+    }
+    const isPriority = !!ctx.priority;
+    const distance = distanceToViewport(ctx.stage);
+    if (best === -1 || (isPriority && !bestPriority) || (isPriority === bestPriority && distance < bestDistance)) {
+      best = i;
+      bestPriority = isPriority;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/**
+ * @param {Element} el
+ * @returns {number}
+ */
+function distanceToViewport(el) {
+  try {
+    const rect = el.getBoundingClientRect();
+    const viewportMiddle = (window.innerHeight || 0) / 2;
+    return Math.abs(rect.top + rect.height / 2 - viewportMiddle);
+  } catch {
+    return Infinity;
+  }
+}
+
+/**
+ * Frees a loading slot and starts the next queued embed.
+ *
+ * @param {EmbedContext} ctx
+ * @param {number | null} [slot]
+ */
+function releaseSlot(ctx, slot = null) {
+  if (!ctx.slotHeld) return;
+  if (slot != null && ctx.activeSlotId !== slot) return;
+  ctx.slotHeld = false;
+  ctx.activeSlotId = null;
+  activeContexts.delete(ctx);
+  activeLoads = Math.max(0, activeLoads - 1);
+  pumpQueue();
+}
+
+/**
+ * Removes a queued embed from the load queue.
+ *
+ * @param {EmbedContext} ctx
+ */
+function removeFromQueue(ctx) {
+  if (!ctx.queued) return;
+  const idx = loadQueue.indexOf(ctx);
+  if (idx !== -1) loadQueue.splice(idx, 1);
+  ctx.queued = false;
+  ctx.priority = false;
+  ctx.resolveStart?.();
+  ctx.resolveStart = null;
+  ctx.startPromise = null;
 }
 
 /**
@@ -437,9 +693,15 @@ function fetchCode(url) {
  * @param {EmbedContext} ctx
  * @returns {Promise<EmbedContext>}
  */
-function load(ctx) {
-  if (ctx.state === 'ready') return Promise.resolve(ctx);
-  if (ctx.loading) return ctx.loading;
+function load(ctx, slot = ctx.activeSlotId) {
+  if (ctx.state === 'ready') {
+    releaseSlot(ctx, slot);
+    return Promise.resolve(ctx);
+  }
+  if (ctx.loading) {
+    releaseSlot(ctx, slot);
+    return ctx.loading;
+  }
 
   setState(ctx, 'loading');
   showPlaceholder(ctx, { spinner: true, text: 'Loading 3D viewer…' });
@@ -467,6 +729,8 @@ function load(ctx) {
         mountCodeToggle(ctx);
       }
 
+      if (slot !== ctx.activeSlotId) return ctx; // aborted by reload/unload
+
       const hasCode = !!(code && code.trim());
       if (hasCode) ensureResourceHints(ctx.viewer, true);
       const params = buildParams({
@@ -480,6 +744,8 @@ function load(ctx) {
         throw new Error('Nothing to show: add build123d code or a .glb/.gltf model.');
       }
       if (hasCode) params.set('pg_code', await encodeCode(code));
+      if (slot !== ctx.activeSlotId) return ctx; // aborted while encoding
+
       const url = buildViewerUrl(ctx.viewer, params);
       ctx.url = url;
 
@@ -513,14 +779,22 @@ function load(ctx) {
       );
       iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
       iframe.addEventListener('load', () => {
+        releaseSlot(ctx, slot);
         if (ctx.iframe !== iframe) return;
         if (ctx.timer) clearTimeout(ctx.timer);
         ctx.timer = null;
+        if (ctx.pendingUnload) {
+          ctx.pendingUnload = false;
+          unload(ctx);
+          return;
+        }
         setState(ctx, 'ready');
         clearPlaceholder(ctx);
       });
       iframe.addEventListener('error', () => {
+        releaseSlot(ctx, slot);
         if (ctx.iframe !== iframe) return;
+        ctx.pendingUnload = false;
         setState(ctx, 'error');
         showPlaceholder(ctx, {
           text: 'The 3D viewer failed to load. Check your connection or the viewer URL.',
@@ -533,6 +807,8 @@ function load(ctx) {
 
       // Surface very slow loads instead of an infinite spinner.
       ctx.timer = setTimeout(() => {
+        // Never let a hung iframe block the queue for other embeds.
+        releaseSlot(ctx, slot);
         if (ctx.state === 'loading') {
           showPlaceholder(ctx, {
             spinner: true,
@@ -541,6 +817,8 @@ function load(ctx) {
         }
       }, 20000);
     } catch (err) {
+      if (slot !== ctx.activeSlotId) return ctx; // aborted
+      releaseSlot(ctx, slot);
       setState(ctx, 'error');
       showPlaceholder(ctx, { text: describeError(err), error: true });
       // eslint-disable-next-line no-console
@@ -724,11 +1002,20 @@ function addReloadButton(ctx) {
  */
 async function ensureLoaded(ctx) {
   if (ctx.state === 'ready') return;
+  if (ctx.state === 'error') reload(ctx);
   if (ctx.loading) {
     await ctx.loading;
     return;
   }
-  await load(ctx);
+  enqueueLoad(ctx, true);
+  if (ctx.loading) {
+    await ctx.loading;
+    return;
+  }
+  if (ctx.startPromise) {
+    await ctx.startPromise;
+    if (ctx.loading) await ctx.loading;
+  }
 }
 
 /**
@@ -741,11 +1028,15 @@ function reload(ctx) {
     ctx.iframe.remove();
     ctx.iframe = null;
   }
+  releaseSlot(ctx, ctx.activeSlotId);
+  removeFromQueue(ctx);
   clearPlaceholder(ctx);
   setState(ctx, 'idle');
   ctx.url = null;
   ctx.openUrl = null;
-  load(ctx);
+  ctx.loading = null;
+  ctx.pendingUnload = false;
+  enqueueLoad(ctx, true);
 }
 
 /**
@@ -947,4 +1238,12 @@ function without(attrs, keys) {
  * @property {boolean} lazy
  * @property {boolean} chrome
  * @property {ReturnType<typeof setTimeout> | null} timer
+ * @property {boolean} queued
+ * @property {boolean} priority
+ * @property {Promise<void> | null} startPromise
+ * @property {(() => void) | null} resolveStart
+ * @property {boolean} slotHeld
+ * @property {number | null} activeSlotId
+ * @property {number} slotSeq
+ * @property {boolean} pendingUnload
  */

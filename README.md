@@ -38,6 +38,8 @@ Python code block. The same Markdown works everywhere.
 - **Fast perceived startup** — pair live code with a `preview` GLB: the model appears in ~2–3s
   while the in-browser sandbox boots (or waits for a **Run build123d** click), then the live result
   replaces it.
+- **Efficient with many embeds** — nearest-first load queue with capped concurrency, automatic
+  unloading of far-offscreen viewers, and one viewer app per fence instead of per model.
 - **No build, static hosting** — the plugin is a single root-level `docsify-yacv.js`, committed and
   served as-is. The repository root is the docsify demo.
 
@@ -219,6 +221,9 @@ window.$docsify = {
 | `editor` | `0` | In-iframe Monaco opacity (`0` hides it; docsify shows the code). |
 | `lazy` | `true` | Create iframes when they approach the viewport. |
 | `lazyMargin` | `200px` | How far before the viewport lazy embeds start loading. |
+| `maxConcurrent` | `2` | Maximum iframes created at the same time. |
+| `unloadOffscreen` | `true` | Unload far-offscreen iframes (`'static'` = only non-code embeds, `false` = keep all). |
+| `unloadMargin` | `100% 0px` | How far outside the viewport an embed is unloaded. |
 | `autoLoad` | `true` | `false` shows a **Load 3D viewer** button. |
 | `chrome` | `true` | Show the embed toolbar. |
 | `openInNewTab` | `true` | Show the **Open** action (full viewer with editor). |
