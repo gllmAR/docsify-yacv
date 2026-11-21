@@ -7,6 +7,8 @@ noticeably faster. See [performance notes](reference.md?id=performance-and-limit
 > For pages where the 3D view matters more than interactive code, pair the fence with a
 > pre-exported `preview` GLB (see [Load code from a file](#load-code-from-a-file)) and optionally
 > `auto-load=false` so the sandbox starts only when the reader clicks **Run build123d**.
+>
+> Add `vertices=False` to `show()` for a cleaner embed; yacv draws small vertex markers by default.
 
 ## A parametric part
 

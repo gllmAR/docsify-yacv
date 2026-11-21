@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DEFAULT_OPEN_VIEWER,
   DEFAULT_OPTIONS,
   DEFAULT_VIEWER,
   YACV_SETTING_TYPES,
@@ -11,6 +12,7 @@ import {
 test('resolveOptions: defaults', () => {
   const options = resolveOptions();
   assert.equal(options.viewer, DEFAULT_VIEWER);
+  assert.equal(options.openViewer, DEFAULT_OPEN_VIEWER);
   assert.equal(options.height, DEFAULT_OPTIONS.height);
   assert.equal(options.version, 'stable');
   assert.equal(options.debug, false);
@@ -62,6 +64,13 @@ test('resolveOptions: scheduling and unloading options', () => {
   assert.equal(resolveOptions({ unloadOffscreen: 'static' }).unloadOffscreen, 'static');
   assert.equal(resolveOptions({ unloadMargin: '100%' }).unloadMargin, '100%');
   assert.equal(resolveOptions({ unloadMargin: '10vh' }).unloadMargin, '100% 0px');
+});
+
+test('resolveOptions: openViewer is independent of viewer', () => {
+  const options = resolveOptions({ viewer: '/embed/', openViewer: 'https://full.example/' });
+  assert.equal(options.viewer, '/embed/');
+  assert.equal(options.openViewer, 'https://full.example/');
+  assert.equal(resolveOptions({ viewer: '/embed/' }).openViewer, DEFAULT_OPEN_VIEWER);
 });
 
 test('resolveOptions: marks editor as explicit only when configured', () => {

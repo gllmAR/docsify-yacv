@@ -38,15 +38,19 @@
         subMaxLevel: 2,
         auto2top: true,
         yacv: {
-          // `npm run demo` sets ?viewer=/yacv/ to use its local proxy, which
-          // makes the demo models same-origin (browsers block public origins
-          // from fetching loopback URLs). Plain static hosting uses the public
-          // viewer below.
-          viewer: params.get('viewer') || 'https://yeicor-3d.github.io/yet-another-cad-viewer/',
+          // The repo ships an optimized, headless viewer build (no Monaco,
+          // drawers closed, faster Python bootstrap). `?viewer=...` overrides
+          // it, e.g. to test the upstream viewer.
+          viewer: params.get('viewer') || './viewer/',
+          // "Open" uses the full upstream viewer so readers can edit code there.
+          openViewer: 'https://yeicor-3d.github.io/yet-another-cad-viewer/',
           version: 'stable',
           height: '460px',
           settings: {
             edgeWidth: 1,
+            // The grid/axes helpers add a lot of geometry and can z-fight
+            // with the model at close zoom; the orientation gizmo remains.
+            loadHelpers: false,
           },
         },
       };

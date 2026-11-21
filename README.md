@@ -5,7 +5,7 @@ viewers, powered by [Yet Another CAD Viewer](https://github.com/yeicor-3d/yet-an
 Build123d runs entirely in the reader's browser (OCP compiled to WebAssembly), so there is no
 server, no Python install and no build step.
 
-```build123d height=440 title="build123d — click Run to edit" preview="assets/preview-part.glb#name=part" auto-load=false
+```build123d height=440 title="build123d — click Run, or Open to edit" preview="assets/preview-part.glb#name=part" auto-load=false
 from build123d import *
 
 with BuildPart() as part:
@@ -15,7 +15,7 @@ with BuildPart() as part:
     Cylinder(3, 20, mode=Mode.SUBTRACT)
 
 part.color = (0.16, 0.47, 0.80, 1)
-show(part)
+show(part, vertices=False)  # cleaner look; edges remain selectable
 ```
 
 On a Docsify page this fence becomes an interactive viewer; on GitHub/Codeberg it stays a readable
@@ -40,6 +40,8 @@ Python code block. The same Markdown works everywhere.
   replaces it.
 - **Efficient with many embeds** — nearest-first load queue with capped concurrency, automatic
   unloading of far-offscreen viewers, and one viewer app per fence instead of per model.
+- **Optimized embedded viewer** — the repo ships a headless, pruned yacv build: no Monaco, drawers
+  closed, full-canvas 3D and a ~6s faster Python bootstrap.
 - **No build, static hosting** — the plugin is a single root-level `docsify-yacv.js`, committed and
   served as-is. The repository root is the docsify demo.
 
@@ -212,13 +214,14 @@ window.$docsify = {
 
 | Option | Default | Description |
 | ------ | ------- | ----------- |
-| `viewer` | yacv GitHub Pages build | Viewer frontend URL (absolute or relative). |
+| `viewer` | `https://gllmar.github.io/docsify-yacv/viewer/` | Headless optimized viewer for embeds (absolute or relative). |
+| `openViewer` | `https://yeicor-3d.github.io/yet-another-cad-viewer/` | Viewer used by the **Open** action (full upstream build with the editor). |
 | `height` | `480px` | Default stage height (number = px, CSS length, or `auto`). |
 | `title` | `''` | Default toolbar title. |
 | `version` | `stable` | build123d version for live code. |
 | `debug` | `false` | Use OCP.wasm debug wheels. |
 | `constraints` | `''` | Pip constraints (`;`/newline separated or JSON mapping). |
-| `editor` | `0` | In-iframe Monaco opacity (`0` hides it; docsify shows the code). |
+| `editor` | `0` | In-iframe Monaco opacity (`0` hides it; docsify shows the code). Ignored by the headless viewer. |
 | `lazy` | `true` | Create iframes when they approach the viewport. |
 | `lazyMargin` | `200px` | How far before the viewport lazy embeds start loading. |
 | `maxConcurrent` | `2` | Maximum iframes created at the same time. |
@@ -250,19 +253,51 @@ performance notes, styling variables, security notes and troubleshooting.
 | Additional pure-Python packages | `await micropip.install("bd_warehouse")` inside the snippet |
 | Static export for fast pages | `yacv_server.export_all()` + a `yacv` fence |
 
+## Optimized embedded viewer
+
+The **default `viewer`** is a **headless, pruned yacv build** prepared for the
+[b3d-live VS Code extension](https://codeberg.org/gllm/Open-VSX-yet-another-cad-viewer) and hosted
+from this repository (`viewer/`):
+
+- both side drawers start closed and the 3D scene fills the embed
+- the playground runs headless: **Monaco is never loaded** and its assets are pruned from the build
+- the Python bootstrap stubs four heavy/unused wheels (`threejs-materials` ~90 MB, `sympy`,
+  `scikit-learn`, `IPython`), cutting a warm live bootstrap from roughly 21–24s to ~15s
+- static/preview embeds run in mesh mode and never start Pyodide at all
+
+Use it for embeds and keep the full upstream viewer for **Open**, where the editor is available:
+
+These are the defaults, so nothing needs configuring:
+
+```js
+window.$docsify = {
+  yacv: {
+    viewer: 'https://gllmar.github.io/docsify-yacv/viewer/',
+    openViewer: 'https://yeicor-3d.github.io/yet-another-cad-viewer/',
+  },
+};
+```
+
+Copy the `viewer/` directory into your static site and use `viewer: './viewer/'` for a same-origin,
+offline-capable embed. The `editor` option is ignored by the headless viewer — use **Open** to edit.
+Point `viewer` at the upstream URL if you need the in-iframe Monaco editor. See
+[`viewer/NOTICE.md`](viewer/NOTICE.md) for provenance and licensing.
+
 ## Time to interactive
 
-Measured on the live demo with a warm browser cache (Chromium, 1 Gbps, M1-class machine):
+Measured on the live demo with a warm browser cache (Chromium, M1-class machine):
 
 | Embed | Time until the model is visible |
 | ----- | ------------------------------- |
-| Static `yacv` model (GLB) | ~2–3s |
-| Live build123d **with `preview`** | preview in ~2–3s; live geometry replaces it ~20s after the sandbox starts |
+| Static `yacv` model (GLB) | ~2–3s (optimized viewer), ~3s upstream |
+| Live build123d **with `preview`** | preview in ~2–3s; live geometry replaces it when the sandbox finishes |
 | Live build123d **with `preview` + `auto-load=false`** | preview in ~2–3s; sandbox starts only on **Run build123d** |
-| Live build123d without preview | ~20–30s (Pyodide + build123d/OCP.wasm install and imports) |
+| Live build123d, optimized viewer | **~15s** warm cache |
+| Live build123d, upstream viewer | ~21–30s (includes Monaco) |
 
 The live sandbox cost is dominated by Pyodide boot plus installing/importing build123d, OCP and the
-scientific Python stack — not by this plugin. Practical mitigations:
+scientific Python stack — not by this plugin. The optimized `viewer/` build removes Monaco and stubs
+unused wheels, which is where the ~6s improvement comes from. Practical mitigations:
 
 - **Add a `preview` GLB.** Export the same model with `yacv_server.export_all()` and use the live
   model's variable name: `preview="assets/part.glb#name=part"`. yacv renders it immediately and
@@ -286,6 +321,7 @@ index.html          docsify demo
 README.md           demo home / this documentation
 docsify-yacv.js     the plugin (committed IIFE, auto-registering)
 docsify-yacv.esm.js ESM entry for npm/bundlers
+viewer/             optimized headless yacv build (see viewer/NOTICE.md)
 build123d.md        docs pages
 models.md
 reference.md

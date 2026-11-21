@@ -1,7 +1,11 @@
 import { isPlainObject, normalizeSettingKey, toBool, toNumber } from './util.js';
 
 /** Default public viewer (GitHub Pages deployment of Yet Another CAD Viewer). */
-export const DEFAULT_VIEWER = 'https://yeicor-3d.github.io/yet-another-cad-viewer/';
+// Default embedded viewer: prebuilt headless build in this repo (no Monaco,
+// closed drawers, faster bootstrap). Static and preview embeds use mesh mode.
+export const DEFAULT_VIEWER = 'https://gllmar.github.io/docsify-yacv/viewer/';
+// Full upstream viewer for the "Open" action, where the editor is available.
+export const DEFAULT_OPEN_VIEWER = 'https://yeicor-3d.github.io/yet-another-cad-viewer/';
 
 /**
  * Every setting accepted by the yacv frontend (see `frontend/misc/settings.ts`
@@ -76,6 +80,8 @@ export const RESERVED_ATTRS = new Set([
 /** @type {Required<DocsifyYacvOptions>} */
 export const DEFAULT_OPTIONS = {
   viewer: DEFAULT_VIEWER,
+  /** Viewer used by the "Open" action (default: the full upstream viewer). */
+  openViewer: DEFAULT_OPEN_VIEWER,
   height: '480px',
   title: '',
   /** build123d version installed by the in-browser playground. */
@@ -164,6 +170,8 @@ export function resolveOptions(userOptions = {}, vm = null) {
   merged.height = merged.height == null || merged.height === '' ? DEFAULT_OPTIONS.height : merged.height;
   merged.title = merged.title == null ? '' : String(merged.title);
   merged.viewer = merged.viewer == null || merged.viewer === '' ? DEFAULT_VIEWER : String(merged.viewer);
+  merged.openViewer =
+    merged.openViewer == null || merged.openViewer === '' ? DEFAULT_OPEN_VIEWER : String(merged.openViewer);
 
   // Internal flag: an explicitly configured editor wins over raw pg_opacity_*
   // settings, the implicit default (0) does not.
@@ -210,7 +218,8 @@ export function normalizeEditor(value, fallback = 0) {
 
 /**
  * @typedef {Object} DocsifyYacvOptions
- * @property {string} [viewer] Base URL of the yacv frontend.
+ * @property {string} [viewer] Base URL of the yacv frontend for embedded viewers.
+ * @property {string} [openViewer] Base URL used by the "Open" action (defaults to `viewer`).
  * @property {string | number} [height] Default viewer height (number = px).
  * @property {string} [title] Default title shown in the toolbar.
  * @property {string} [version] build123d version (`stable`, `0.9.1`, `dev`, `pull/123/head`, ...).

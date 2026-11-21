@@ -234,6 +234,7 @@ function createEmbed(spec, vm, options) {
   const height = cssSize(pick(attrs, 'height') ?? options.height, '480px');
   const title = stringAttr(pick(attrs, 'title')) || options.title || '';
   const viewer = stringAttr(pick(attrs, 'viewer')) || options.viewer;
+  const openViewer = stringAttr(pick(attrs, 'openviewer')) || options.openViewer || viewer;
   const version =
     stringAttr(pick(attrs, 'version', 'b3dversion', 'pgversion', 'pg_version')) || options.version;
   const modelCount =
@@ -285,6 +286,7 @@ function createEmbed(spec, vm, options) {
     attrs,
     base,
     viewer,
+    openViewer,
     models: spec.models,
     container,
     toolbar,
@@ -833,7 +835,7 @@ function load(ctx, slot = ctx.activeSlotId) {
         openParams.set('pg_opacity_loading', openEditor);
         openParams.set('pg_opacity_loaded', openEditor);
       }
-      ctx.openUrl = buildViewerUrl(ctx.viewer, openParams);
+      ctx.openUrl = buildViewerUrl(ctx.openViewer, openParams);
 
       const iframe = document.createElement('iframe');
       iframe.className = 'yacv-iframe';
@@ -1283,6 +1285,7 @@ function without(attrs, keys) {
  * @property {Record<string, any>} attrs
  * @property {string | ((src: string) => string)} base
  * @property {string} viewer
+ * @property {string} openViewer
  * @property {string[]} models
  * @property {HTMLElement} container
  * @property {HTMLElement} toolbar

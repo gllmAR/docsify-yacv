@@ -29,13 +29,14 @@ window.$docsify = {
 
 | Option         | Type                | Default                                          | Description |
 | -------------- | ------------------- | ------------------------------------------------ | ----------- |
-| `viewer`       | `string`            | `https://yeicor-3d.github.io/yet-another-cad-viewer/` | yacv frontend URL (absolute or relative). |
+| `viewer`       | `string`            | `https://gllmar.github.io/docsify-yacv/viewer/`  | Headless optimized yacv for embeds (absolute or relative). |
+| `openViewer`   | `string`            | `https://yeicor-3d.github.io/yet-another-cad-viewer/` | Viewer used by the **Open** action (full upstream build with the editor). |
 | `height`       | `number \| string`  | `480px`                                          | Default viewer height. Numbers are pixels; `auto` uses a 4:3 area. |
 | `title`        | `string`            | `''`                                             | Default toolbar title. |
 | `version`      | `string`            | `stable`                                         | build123d version for live code (`stable`, `0.9.1`, `dev`, `pull/123/head`, ...). |
 | `debug`        | `boolean`           | `false`                                          | Use OCP.wasm debug wheels. |
 | `constraints`  | `string`            | `''`                                             | Pip constraints for the sandbox, newline or `;` separated, or a JSON mapping. |
-| `editor`       | `number \| string`  | `0`                                              | Opacity of the in-iframe Monaco editor. `0` hides it (code is shown by docsify instead); `show` = `0.9`. |
+| `editor`       | `number \| string`  | `0`                                              | Opacity of the in-iframe Monaco editor. `0` hides it (code is shown by docsify instead); `show` = `0.9`. Ignored by the headless viewer. |
 | `lazy`         | `boolean`           | `true`                                           | Create the iframe only when the embed approaches the viewport. |
 | `lazyMargin`   | `string \| number`  | `200px`                                          | How far before the viewport a lazy embed starts loading. |
 | `maxConcurrent` | `number`           | `2`                                              | Maximum iframes created at the same time (nearest first). |
@@ -171,6 +172,29 @@ may remain visible at the top of the iframe, from which readers can bring the ed
 `editor=0.9` to show the editor directly, or rely on the docsify code panel plus the **Open**
 action.
 
+## Optimized viewer build
+
+The default `viewer` is a prebuilt headless yacv (see
+[`viewer/NOTICE.md`](viewer/NOTICE.md)). Compared with the upstream viewer:
+
+- no Monaco assets/requests (the playground runs headless)
+- drawers start closed, the 3D scene fills the frame
+- fast Python bootstrap (mock `threejs-materials`, `sympy`, `scikit-learn`, `IPython`)
+- mesh/static embeds never bootstrap Pyodide
+
+These are the defaults. To self-host, copy `viewer/` and use:
+
+```js
+window.$docsify = {
+  yacv: {
+    viewer: './viewer/',
+    openViewer: 'https://yeicor-3d.github.io/yet-another-cad-viewer/',
+  },
+};
+```
+
+Set `viewer` to the upstream URL if you need the in-page Monaco editor (`editor` option).
+
 ## Time to interactive
 
 Measured on the live demo with a warm cache (Chromium, M1-class machine):
@@ -178,9 +202,10 @@ Measured on the live demo with a warm cache (Chromium, M1-class machine):
 | Embed | Model visible |
 | ----- | ------------- |
 | Static GLB (`yacv` fence) | ~2–3s |
-| Live build123d + `preview` GLB | ~2–3s, replaced by live geometry ~20s after the sandbox starts |
+| Live build123d + `preview` GLB | ~2–3s, replaced by live geometry when the sandbox finishes |
 | Live build123d + `preview` + `auto-load=false` | ~2–3s; sandbox starts on **Run build123d** |
-| Live build123d without preview | ~20–30s |
+| Live build123d, optimized viewer | **~15s** |
+| Live build123d, upstream viewer | ~21–30s (includes Monaco) |
 
 The live cost is Pyodide boot plus installing/importing build123d, OCP.wasm and the scientific
 Python stack. It is not caused by this plugin and cannot be removed from the docs side.

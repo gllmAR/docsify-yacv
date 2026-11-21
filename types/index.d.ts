@@ -2,8 +2,11 @@
  * Type definitions for docsify-yacv.
  */
 
-/** Default yacv frontend URL (GitHub Pages deployment). */
+/** Default embedded viewer: the headless, optimized build in this repo. */
 export declare const DEFAULT_VIEWER: string;
+
+/** Default viewer for the "Open" action: the full upstream yacv build. */
+export declare const DEFAULT_OPEN_VIEWER: string;
 
 export type YacvSettingValue = string | number | boolean;
 
@@ -12,8 +15,16 @@ export type YacvSettingValue = string | number | boolean;
  * `window.$docsify.yacv` (options passed to the factory take precedence).
  */
 export interface DocsifyYacvOptions {
-  /** Base URL of the yacv frontend. Default: the public GitHub Pages build. */
+  /**
+   * Base URL of the yacv frontend for embedded viewers. Default: the headless
+   * optimized build at `https://gllmar.github.io/docsify-yacv/viewer/`.
+   */
   viewer?: string;
+  /**
+   * Base URL used by the "Open" action. Default: the full upstream viewer
+   * (`https://yeicor-3d.github.io/yet-another-cad-viewer/`).
+   */
+  openViewer?: string;
   /** Default viewer height (`480`, `"480px"`, `"60vh"`, `"auto"`, ...). */
   height?: string | number;
   /** Default title shown in the embed toolbar. */

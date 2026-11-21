@@ -298,7 +298,8 @@
   }
 
   // src/options.js
-  var DEFAULT_VIEWER = "https://yeicor-3d.github.io/yet-another-cad-viewer/";
+  var DEFAULT_VIEWER = "https://gllmar.github.io/docsify-yacv/viewer/";
+  var DEFAULT_OPEN_VIEWER = "https://yeicor-3d.github.io/yet-another-cad-viewer/";
   var YACV_SETTING_TYPES = {
     loadHelpers: "boolean",
     edgeWidth: "number",
@@ -326,6 +327,8 @@
   );
   var DEFAULT_OPTIONS = {
     viewer: DEFAULT_VIEWER,
+    /** Viewer used by the "Open" action (default: the full upstream viewer). */
+    openViewer: DEFAULT_OPEN_VIEWER,
     height: "480px",
     title: "",
     /** build123d version installed by the in-browser playground. */
@@ -404,6 +407,7 @@
     merged.height = merged.height == null || merged.height === "" ? DEFAULT_OPTIONS.height : merged.height;
     merged.title = merged.title == null ? "" : String(merged.title);
     merged.viewer = merged.viewer == null || merged.viewer === "" ? DEFAULT_VIEWER : String(merged.viewer);
+    merged.openViewer = merged.openViewer == null || merged.openViewer === "" ? DEFAULT_OPEN_VIEWER : String(merged.openViewer);
     merged.editorExplicit = Object.prototype.hasOwnProperty.call(fromConfig, "editor") || Object.prototype.hasOwnProperty.call(own, "editor");
     return (
       /** @type {ResolvedOptions} */
@@ -708,6 +712,7 @@
     const height = cssSize(pick(attrs, "height") ?? options.height, "480px");
     const title = stringAttr(pick(attrs, "title")) || options.title || "";
     const viewer = stringAttr(pick(attrs, "viewer")) || options.viewer;
+    const openViewer = stringAttr(pick(attrs, "openviewer")) || options.openViewer || viewer;
     const version = stringAttr(pick(attrs, "version", "b3dversion", "pgversion", "pg_version")) || options.version;
     const modelCount = spec.models.length + splitList(pick(attrs, "models")).length + splitList(pick(attrs, "src")).length + splitList(pick(attrs, "preview")).length + splitList(pick(attrs, "preload")).length;
     const autoLoad = pick(attrs, "autoload") === void 0 ? options.autoLoad : toBool(pick(attrs, "autoload"), options.autoLoad);
@@ -745,6 +750,7 @@
       attrs,
       base,
       viewer,
+      openViewer,
       models: spec.models,
       container,
       toolbar,
@@ -1134,7 +1140,7 @@
           openParams.set("pg_opacity_loading", openEditor);
           openParams.set("pg_opacity_loaded", openEditor);
         }
-        ctx.openUrl = buildViewerUrl(ctx.viewer, openParams);
+        ctx.openUrl = buildViewerUrl(ctx.openViewer, openParams);
         const iframe = document.createElement("iframe");
         iframe.className = "yacv-iframe";
         iframe.src = url;

@@ -223,6 +223,7 @@ test.describe('docsify-yacv', () => {
     await embed.getByRole('button', { name: 'Open' }).click();
     const opened = await page.evaluate(() => window.__yacvOpened[0] || null);
     expect(opened).not.toBeNull();
+    expect(opened).toContain('open=1');
     const openParams = viewerParams(opened);
     expect(openParams.get('pg_code')).toBe(viewerParams(before).get('pg_code'));
     // The embedded viewer hides the editor; "Open" shows it in the full viewer.
