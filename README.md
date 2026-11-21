@@ -254,16 +254,10 @@ assets/             demo GLB and Python files
 .nojekyll           serve files as-is on GitHub Pages
 ```
 
-Two ways to publish it:
-
-1. **GitHub Actions (included):** set **Settings → Pages → Source: GitHub Actions**. The
-   `Deploy demo` workflow (`.github/workflows/pages.yml`) copies the committed static files and
-   publishes them — it does not install dependencies or run a build.
-2. **Branch deployment:** set **Settings → Pages → Deploy from a branch → `main` / `(root)`**.
-   No workflow is needed at all.
-
-Either way there is no `npm install` and no build. Any static host (Netlify, Codeberg Pages, S3, a
-local `python -m http.server`) works the same way.
+To publish the demo, set **Settings → Pages → Deploy from a branch → `main` / `(root)`**. There is
+no workflow, no `npm install` and no build step: GitHub serves the committed files directly (the
+root `.nojekyll` disables Jekyll). Any static host (Netlify, Codeberg Pages, S3, a local
+`python -m http.server`) works the same way.
 
 If you edit `src/`, regenerate the two committed artifacts with:
 
