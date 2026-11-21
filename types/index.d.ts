@@ -41,6 +41,16 @@ export interface DocsifyYacvOptions {
   /** Maximum number of iframes created at the same time. Default: 2. */
   maxConcurrent?: number;
   /**
+   * Maximum number of loaded live build123d sandboxes. A live embed keeps its
+   * slot until it is unloaded. Default: 2.
+   */
+  maxLiveConcurrent?: number;
+  /**
+   * How long a live sandbox holds its concurrency slot after its viewer loads.
+   * `0` holds it until the embed is unloaded. Default: 30000.
+   */
+  liveSlotMs?: number;
+  /**
    * Unload far-offscreen iframes to free memory/CPU. `"static"` only unloads
    * embeds without live code. Default: true.
    */

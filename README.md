@@ -222,6 +222,8 @@ window.$docsify = {
 | `lazy` | `true` | Create iframes when they approach the viewport. |
 | `lazyMargin` | `200px` | How far before the viewport lazy embeds start loading. |
 | `maxConcurrent` | `2` | Maximum iframes created at the same time. |
+| `maxLiveConcurrent` | `2` | Maximum live build123d sandboxes loaded at once. |
+| `liveSlotMs` | `30000` | How long a loaded live sandbox holds its slot (`0` = until unloaded). |
 | `unloadOffscreen` | `true` | Unload far-offscreen iframes (`'static'` = only non-code embeds, `false` = keep all). |
 | `unloadMargin` | `100% 0px` | How far outside the viewport an embed is unloaded. |
 | `autoLoad` | `true` | `false` shows a **Load 3D viewer** button. |

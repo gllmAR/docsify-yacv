@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>docsify-yacv live limit e2e</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      window.$docsify = {
+        name: 'live limit e2e',
+        homepage: 'live-limit.md',
+        basePath: '/',
+        yacv: {
+          viewer: '/viewer-stub.html',
+          lazy: true,
+          lazyMargin: '0px',
+          maxConcurrent: 1,
+          maxLiveConcurrent: 1,
+          unloadOffscreen: true,
+          unloadMargin: '0px',
+        },
+      };
+    </script>
+    <script src="/docsify.min.js"></script>
+    <script src="/docsify-yacv.js"></script>
+  </body>
+</html>

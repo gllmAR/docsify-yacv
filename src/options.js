@@ -99,6 +99,18 @@ export const DEFAULT_OPTIONS = {
   /** Maximum number of iframes created at the same time. */
   maxConcurrent: 2,
   /**
+   * Maximum number of loaded live build123d sandboxes. A sandbox holds this
+   * slot until its embed is unloaded, so pages with many live examples do not
+   * boot many Pyodide instances at once.
+   */
+  maxLiveConcurrent: 2,
+  /**
+   * How long a live sandbox holds its live-concurrency slot after its viewer
+   * loads (`0` = until the embed is unloaded). Prevents both unbounded Pyodide
+   * boots and a permanent wait when several live embeds are visible together.
+   */
+  liveSlotMs: 30000,
+  /**
    * Remove far-offscreen iframes to free memory/CPU. `true` unloads every
    * embed, `'static'` only non-code embeds, `false` keeps everything alive.
    */
@@ -142,6 +154,8 @@ export function resolveOptions(userOptions = {}, vm = null) {
   merged.lazyMargin = normalizeMargin(merged.lazyMargin, DEFAULT_OPTIONS.lazyMargin);
   merged.unloadMargin = normalizeMargin(merged.unloadMargin, DEFAULT_OPTIONS.unloadMargin);
   merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
+  merged.maxLiveConcurrent = Math.max(1, Math.floor(toNumber(merged.maxLiveConcurrent, 2)));
+  merged.liveSlotMs = Math.max(0, Math.floor(toNumber(merged.liveSlotMs, 30000)));
   if (merged.unloadOffscreen === 'static') merged.unloadOffscreen = 'static';
   else merged.unloadOffscreen = toBool(merged.unloadOffscreen, true);
   merged.autoLoad = toBool(merged.autoLoad, true);
@@ -206,6 +220,8 @@ export function normalizeEditor(value, fallback = 0) {
  * @property {boolean} [lazy] Only create the iframe when scrolled into view.
  * @property {string | number} [lazyMargin] Viewport margin for lazy loading (px or %).
  * @property {number} [maxConcurrent] Maximum simultaneous iframe creations.
+ * @property {number} [maxLiveConcurrent] Maximum loaded live build123d sandboxes.
+ * @property {number} [liveSlotMs] How long a live sandbox holds its slot (`0` = until unload).
  * @property {boolean | 'static'} [unloadOffscreen] Unload far-offscreen iframes.
  * @property {string | number} [unloadMargin] Viewport margin for offscreen unloading.
  * @property {boolean} [autoLoad] Load automatically (false = click to load).

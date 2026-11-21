@@ -23,8 +23,12 @@ const unloadObservedStages = new Set();
 const loadQueue = [];
 /** @type {Set<EmbedContext>} */
 const activeContexts = new Set();
+/** @type {Set<EmbedContext>} */
+const liveContexts = new Set();
 let activeLoads = 0;
+let liveActive = 0;
 let maxConcurrent = 2;
+let maxLiveConcurrent = 2;
 
 /** @type {Map<string, Promise<string>>} */
 const fetchCache = new Map();
@@ -49,6 +53,7 @@ export function mountAll(vm, options) {
   const root = document.querySelector('.markdown-section');
   if (!root) return;
   maxConcurrent = Math.max(1, Math.floor(options.maxConcurrent || 2));
+  maxLiveConcurrent = Math.max(1, Math.floor(options.maxLiveConcurrent || 2));
   pruneObserver();
   pumpQueue();
 
@@ -312,6 +317,8 @@ function createEmbed(spec, vm, options) {
     slotHeld: false,
     activeSlotId: null,
     slotSeq: 0,
+    liveSlotHeld: false,
+    liveTimer: null,
     pendingUnload: false,
   };
 
@@ -467,6 +474,7 @@ function unload(ctx) {
   ctx.iframe = null;
   clearPlaceholder(ctx);
   releaseSlot(ctx, ctx.activeSlotId);
+  releaseLiveSlot(ctx);
   setState(ctx, 'idle');
   ctx.url = null;
   ctx.openUrl = null;
@@ -491,6 +499,9 @@ function pruneObserver() {
       ctx.loading = null;
       ctx.state = 'idle';
     }
+  }
+  for (const ctx of Array.from(liveContexts)) {
+    if (!ctx.stage.isConnected) releaseLiveSlot(ctx);
   }
 
   if (observer) {
@@ -560,6 +571,13 @@ function pumpQueue() {
       continue;
     }
 
+    if (!acquireLiveSlot(ctx)) {
+      // A live sandbox slot filled in the meantime; try later.
+      ctx.queued = true;
+      loadQueue.unshift(ctx);
+      return;
+    }
+
     activeLoads += 1;
     activeContexts.add(ctx);
     ctx.slotHeld = true;
@@ -590,6 +608,9 @@ function pickNextIndex() {
       ctx.resolveStart?.();
       ctx.resolveStart = null;
       ctx.startPromise = null;
+      continue;
+    }
+    if (ctx.hasCode && ctx.live !== false && !ctx.liveSlotHeld && liveActive >= maxLiveConcurrent) {
       continue;
     }
     const isPriority = !!ctx.priority;
@@ -631,6 +652,50 @@ function releaseSlot(ctx, slot = null) {
   activeContexts.delete(ctx);
   activeLoads = Math.max(0, activeLoads - 1);
   pumpQueue();
+}
+
+/**
+ * A live embed needs one of the global live-sandbox slots (held until unload).
+ *
+ * @param {EmbedContext} ctx
+ * @returns {boolean}
+ */
+function acquireLiveSlot(ctx) {
+  if (!ctx.hasCode || ctx.live === false || ctx.liveSlotHeld) return true;
+  if (liveActive >= maxLiveConcurrent) return false;
+  ctx.liveSlotHeld = true;
+  liveContexts.add(ctx);
+  liveActive += 1;
+  return true;
+}
+
+/**
+ * @param {EmbedContext} ctx
+ */
+function releaseLiveSlot(ctx) {
+  if (ctx.liveTimer) clearTimeout(ctx.liveTimer);
+  ctx.liveTimer = null;
+  if (!ctx.liveSlotHeld) return;
+  ctx.liveSlotHeld = false;
+  liveContexts.delete(ctx);
+  liveActive = Math.max(0, liveActive - 1);
+  pumpQueue();
+}
+
+/**
+ * Starts the post-load hold timer for a live sandbox slot. This bounds the
+ * boot concurrency window even when the viewer stays loaded forever.
+ *
+ * @param {EmbedContext} ctx
+ */
+function startLiveHold(ctx) {
+  if (!ctx.liveSlotHeld || ctx.liveTimer) return;
+  const ms = ctx.options.liveSlotMs;
+  if (!ms) return;
+  ctx.liveTimer = setTimeout(() => {
+    ctx.liveTimer = null;
+    releaseLiveSlot(ctx);
+  }, ms);
 }
 
 /**
@@ -732,6 +797,7 @@ function load(ctx, slot = ctx.activeSlotId) {
       if (slot !== ctx.activeSlotId) return ctx; // aborted by reload/unload
 
       const hasCode = !!(code && code.trim());
+      if (!hasCode) releaseLiveSlot(ctx);
       if (hasCode) ensureResourceHints(ctx.viewer, true);
       const params = buildParams({
         hasCode,
@@ -788,11 +854,13 @@ function load(ctx, slot = ctx.activeSlotId) {
           unload(ctx);
           return;
         }
+        startLiveHold(ctx);
         setState(ctx, 'ready');
         clearPlaceholder(ctx);
       });
       iframe.addEventListener('error', () => {
         releaseSlot(ctx, slot);
+        releaseLiveSlot(ctx);
         if (ctx.iframe !== iframe) return;
         ctx.pendingUnload = false;
         setState(ctx, 'error');
@@ -809,6 +877,7 @@ function load(ctx, slot = ctx.activeSlotId) {
       ctx.timer = setTimeout(() => {
         // Never let a hung iframe block the queue for other embeds.
         releaseSlot(ctx, slot);
+        releaseLiveSlot(ctx);
         if (ctx.state === 'loading') {
           showPlaceholder(ctx, {
             spinner: true,
@@ -819,6 +888,7 @@ function load(ctx, slot = ctx.activeSlotId) {
     } catch (err) {
       if (slot !== ctx.activeSlotId) return ctx; // aborted
       releaseSlot(ctx, slot);
+      releaseLiveSlot(ctx);
       setState(ctx, 'error');
       showPlaceholder(ctx, { text: describeError(err), error: true });
       // eslint-disable-next-line no-console
@@ -1024,6 +1094,8 @@ async function ensureLoaded(ctx) {
 function reload(ctx) {
   if (ctx.timer) clearTimeout(ctx.timer);
   ctx.timer = null;
+  if (ctx.liveTimer) clearTimeout(ctx.liveTimer);
+  ctx.liveTimer = null;
   if (ctx.iframe) {
     ctx.iframe.remove();
     ctx.iframe = null;
@@ -1245,5 +1317,7 @@ function without(attrs, keys) {
  * @property {boolean} slotHeld
  * @property {number | null} activeSlotId
  * @property {number} slotSeq
+ * @property {boolean} liveSlotHeld
+ * @property {ReturnType<typeof setTimeout> | null} liveTimer
  * @property {boolean} pendingUnload
  */

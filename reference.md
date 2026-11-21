@@ -39,6 +39,8 @@ window.$docsify = {
 | `lazy`         | `boolean`           | `true`                                           | Create the iframe only when the embed approaches the viewport. |
 | `lazyMargin`   | `string \| number`  | `200px`                                          | How far before the viewport a lazy embed starts loading. |
 | `maxConcurrent` | `number`           | `2`                                              | Maximum iframes created at the same time (nearest first). |
+| `maxLiveConcurrent` | `number`        | `2`                                              | Maximum loaded live build123d sandboxes. A sandbox holds the slot until unloaded or `liveSlotMs`. |
+| `liveSlotMs`   | `number`            | `30000`                                          | How long a loaded live sandbox holds its live slot (`0` = until unloaded). |
 | `unloadOffscreen` | `boolean \| 'static'` | `true`                                        | Remove far-offscreen iframes to free memory. `'static'` keeps live sandboxes alive. |
 | `unloadMargin` | `string \| number`  | `100% 0px`                                       | How far outside the viewport an embed is unloaded. |
 | `autoLoad`     | `boolean`           | `true`                                           | When `false`, show a **Load 3D viewer** button. With a `preview`/static model it instead loads the preview and shows a **Run build123d** button for the sandbox. |
@@ -153,6 +155,9 @@ These are forwarded to the viewer. See the
    example there. `Reload` resets the embedded iframe.
 7. `preview`, `src`, `models` and `preload` are all passed as yacv `preload` parameters. The viewer
    renders them while the sandbox boots; a live model with the same `#name=` replaces its preview.
+8. Iframes are started through a nearest-first queue (`maxConcurrent`). Live embeds additionally
+   acquire one of `maxLiveConcurrent` slots, released on unload or after `liveSlotMs`. Far-offscreen
+   iframes are removed (`unloadOffscreen`) and recreated when they approach the viewport again.
 
 ## Embed chrome and the yacv sidebars
 
@@ -204,9 +209,11 @@ Practical improvements:
 - The plugin serializes iframe creation (`maxConcurrent`, default 2, closest embed first) and
   unloads far-offscreen viewers by default. Live embeds restart when scrolled back; use
   `unloadOffscreen: 'static'` to keep them alive.
-- `maxConcurrent` limits iframe startup, not Pyodide concurrency: if readers scroll quickly through
-  several live embeds, eventually several sandboxes can be booting. Clearing the viewport unloads
-  them and frees memory.
+- `maxConcurrent` limits iframe startup; `maxLiveConcurrent` limits loaded live sandboxes. A live
+  sandbox keeps its slot until it is unloaded or `liveSlotMs` elapses, so several visible live
+  examples take turns booting instead of thrashing the CPU. Set `maxLiveConcurrent: 1` to serialize
+  them; if you disable `unloadOffscreen`, raise it to at least the number of live embeds that can be
+  on screen together.
 - The sandbox editor is heavy (Monaco). The default `editor=0` avoids loading it visibly, and the
   docsify code block already gives readers the source.
 - WebAssembly, `CompressionStream` and `IntersectionObserver` are required for the full experience;

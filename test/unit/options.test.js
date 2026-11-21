@@ -19,6 +19,8 @@ test('resolveOptions: defaults', () => {
   assert.equal(options.lazy, true);
   assert.equal(options.lazyMargin, '200px');
   assert.equal(options.maxConcurrent, 2);
+  assert.equal(options.maxLiveConcurrent, 2);
+  assert.equal(options.liveSlotMs, 30000);
   assert.equal(options.unloadOffscreen, true);
   assert.equal(options.unloadMargin, '100% 0px');
   assert.equal(options.autoLoad, true);
@@ -50,6 +52,11 @@ test('resolveOptions: lazyMargin accepts numbers and CSS lengths', () => {
 test('resolveOptions: scheduling and unloading options', () => {
   assert.equal(resolveOptions({ maxConcurrent: 0 }).maxConcurrent, 1);
   assert.equal(resolveOptions({ maxConcurrent: '3' }).maxConcurrent, 3);
+  assert.equal(resolveOptions({ maxLiveConcurrent: 0 }).maxLiveConcurrent, 1);
+  assert.equal(resolveOptions({ maxLiveConcurrent: '1' }).maxLiveConcurrent, 1);
+  assert.equal(resolveOptions({ liveSlotMs: 0 }).liveSlotMs, 0);
+  assert.equal(resolveOptions({ liveSlotMs: -5 }).liveSlotMs, 0);
+  assert.equal(resolveOptions({ liveSlotMs: '1500' }).liveSlotMs, 1500);
   assert.equal(resolveOptions({ unloadOffscreen: false }).unloadOffscreen, false);
   assert.equal(resolveOptions({ unloadOffscreen: 'false' }).unloadOffscreen, false);
   assert.equal(resolveOptions({ unloadOffscreen: 'static' }).unloadOffscreen, 'static');

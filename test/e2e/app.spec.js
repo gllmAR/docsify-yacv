@@ -236,6 +236,32 @@ test.describe('docsify-yacv', () => {
     expect(viewerParams(after).get('pg_code')).toBe(viewerParams(before).get('pg_code'));
   });
 
+  test('serializes live sandboxes (maxLiveConcurrent) and releases on unload', async ({ page }) => {
+    await page.goto('/index-live-limit.html');
+    const embeds = page.locator('.yacv-embed');
+    await expect(embeds).toHaveCount(2);
+
+    await embeds.nth(0).scrollIntoViewIfNeeded();
+    await expect(embeds.nth(0).locator('iframe')).toHaveCount(1);
+    await expect(embeds.nth(1).locator('iframe')).toHaveCount(0);
+
+    await embeds.nth(1).scrollIntoViewIfNeeded();
+    await expect(embeds.nth(0).locator('iframe')).toHaveCount(0);
+    await expect(embeds.nth(1).locator('iframe')).toHaveCount(1);
+
+    await embeds.nth(0).scrollIntoViewIfNeeded();
+    await expect(embeds.nth(1).locator('iframe')).toHaveCount(0);
+    await expect(embeds.nth(0).locator('iframe')).toHaveCount(1);
+  });
+
+  test('releases live slots after liveSlotMs so later live embeds can start', async ({ page }) => {
+    await page.goto('/index-live-timeout.html');
+    const embeds = page.locator('.yacv-embed');
+    await expect(embeds).toHaveCount(2);
+    await expect(embeds.nth(0).locator('iframe')).toHaveCount(1);
+    await expect(page.locator('.yacv-embed iframe')).toHaveCount(2, { timeout: 10000 });
+  });
+
   test('limits concurrent iframe loads (maxConcurrent)', async ({ page }) => {
     await page.request.get('/reset-stats');
     await page.goto('/index-concurrency.html');

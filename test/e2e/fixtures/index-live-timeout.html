@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>docsify-yacv live slot timeout e2e</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      window.$docsify = {
+        name: 'live timeout e2e',
+        homepage: 'live-timeout.md',
+        basePath: '/',
+        yacv: {
+          viewer: '/viewer-stub.html',
+          lazy: true,
+          lazyMargin: '600px',
+          maxConcurrent: 1,
+          maxLiveConcurrent: 1,
+          liveSlotMs: 150,
+          unloadOffscreen: false,
+        },
+      };
+    </script>
+    <script src="/docsify.min.js"></script>
+    <script src="/docsify-yacv.js"></script>
+  </body>
+</html>

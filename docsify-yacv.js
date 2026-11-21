@@ -349,6 +349,18 @@
     /** Maximum number of iframes created at the same time. */
     maxConcurrent: 2,
     /**
+     * Maximum number of loaded live build123d sandboxes. A sandbox holds this
+     * slot until its embed is unloaded, so pages with many live examples do not
+     * boot many Pyodide instances at once.
+     */
+    maxLiveConcurrent: 2,
+    /**
+     * How long a live sandbox holds its live-concurrency slot after its viewer
+     * loads (`0` = until the embed is unloaded). Prevents both unbounded Pyodide
+     * boots and a permanent wait when several live embeds are visible together.
+     */
+    liveSlotMs: 3e4,
+    /**
      * Remove far-offscreen iframes to free memory/CPU. `true` unloads every
      * embed, `'static'` only non-code embeds, `false` keeps everything alive.
      */
@@ -382,6 +394,8 @@
     merged.lazyMargin = normalizeMargin(merged.lazyMargin, DEFAULT_OPTIONS.lazyMargin);
     merged.unloadMargin = normalizeMargin(merged.unloadMargin, DEFAULT_OPTIONS.unloadMargin);
     merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
+    merged.maxLiveConcurrent = Math.max(1, Math.floor(toNumber(merged.maxLiveConcurrent, 2)));
+    merged.liveSlotMs = Math.max(0, Math.floor(toNumber(merged.liveSlotMs, 3e4)));
     if (merged.unloadOffscreen === "static") merged.unloadOffscreen = "static";
     else merged.unloadOffscreen = toBool(merged.unloadOffscreen, true);
     merged.autoLoad = toBool(merged.autoLoad, true);
@@ -551,8 +565,11 @@
   var unloadObservedStages = /* @__PURE__ */ new Set();
   var loadQueue = [];
   var activeContexts = /* @__PURE__ */ new Set();
+  var liveContexts = /* @__PURE__ */ new Set();
   var activeLoads = 0;
+  var liveActive = 0;
   var maxConcurrent = 2;
+  var maxLiveConcurrent = 2;
   var fetchCache = /* @__PURE__ */ new Map();
   var ICONS = {
     code: "M14.6,16.6L19.2,12L14.6,7.4L16,6L22,12L16,18L14.6,16.6M9.4,16.6L4.8,12L9.4,7.4L8,6L2,12L8,18L9.4,16.6Z",
@@ -565,6 +582,7 @@
     const root = document.querySelector(".markdown-section");
     if (!root) return;
     maxConcurrent = Math.max(1, Math.floor(options.maxConcurrent || 2));
+    maxLiveConcurrent = Math.max(1, Math.floor(options.maxLiveConcurrent || 2));
     pruneObserver();
     pumpQueue();
     for (const pre of Array.from(root.querySelectorAll(`pre[data-lang]:not([${PROCESSED}])`))) {
@@ -759,6 +777,8 @@
       slotHeld: false,
       activeSlotId: null,
       slotSeq: 0,
+      liveSlotHeld: false,
+      liveTimer: null,
       pendingUnload: false
     };
     ctx.hasCode = hasCode;
@@ -855,6 +875,7 @@
     ctx.iframe = null;
     clearPlaceholder(ctx);
     releaseSlot(ctx, ctx.activeSlotId);
+    releaseLiveSlot(ctx);
     setState(ctx, "idle");
     ctx.url = null;
     ctx.openUrl = null;
@@ -874,6 +895,9 @@
         ctx.loading = null;
         ctx.state = "idle";
       }
+    }
+    for (const ctx of Array.from(liveContexts)) {
+      if (!ctx.stage.isConnected) releaseLiveSlot(ctx);
     }
     if (observer) {
       for (const stage of Array.from(observedStages)) {
@@ -927,6 +951,11 @@
         ctx.startPromise = null;
         continue;
       }
+      if (!acquireLiveSlot(ctx)) {
+        ctx.queued = true;
+        loadQueue.unshift(ctx);
+        return;
+      }
       activeLoads += 1;
       activeContexts.add(ctx);
       ctx.slotHeld = true;
@@ -952,6 +981,9 @@
         ctx.resolveStart?.();
         ctx.resolveStart = null;
         ctx.startPromise = null;
+        continue;
+      }
+      if (ctx.hasCode && ctx.live !== false && !ctx.liveSlotHeld && liveActive >= maxLiveConcurrent) {
         continue;
       }
       const isPriority = !!ctx.priority;
@@ -981,6 +1013,32 @@
     activeContexts.delete(ctx);
     activeLoads = Math.max(0, activeLoads - 1);
     pumpQueue();
+  }
+  function acquireLiveSlot(ctx) {
+    if (!ctx.hasCode || ctx.live === false || ctx.liveSlotHeld) return true;
+    if (liveActive >= maxLiveConcurrent) return false;
+    ctx.liveSlotHeld = true;
+    liveContexts.add(ctx);
+    liveActive += 1;
+    return true;
+  }
+  function releaseLiveSlot(ctx) {
+    if (ctx.liveTimer) clearTimeout(ctx.liveTimer);
+    ctx.liveTimer = null;
+    if (!ctx.liveSlotHeld) return;
+    ctx.liveSlotHeld = false;
+    liveContexts.delete(ctx);
+    liveActive = Math.max(0, liveActive - 1);
+    pumpQueue();
+  }
+  function startLiveHold(ctx) {
+    if (!ctx.liveSlotHeld || ctx.liveTimer) return;
+    const ms = ctx.options.liveSlotMs;
+    if (!ms) return;
+    ctx.liveTimer = setTimeout(() => {
+      ctx.liveTimer = null;
+      releaseLiveSlot(ctx);
+    }, ms);
   }
   function removeFromQueue(ctx) {
     if (!ctx.queued) return;
@@ -1052,6 +1110,7 @@
         }
         if (slot !== ctx.activeSlotId) return ctx;
         const hasCode = !!(code && code.trim());
+        if (!hasCode) releaseLiveSlot(ctx);
         if (hasCode) ensureResourceHints(ctx.viewer, true);
         const params = buildParams({
           hasCode,
@@ -1095,11 +1154,13 @@
             unload(ctx);
             return;
           }
+          startLiveHold(ctx);
           setState(ctx, "ready");
           clearPlaceholder(ctx);
         });
         iframe.addEventListener("error", () => {
           releaseSlot(ctx, slot);
+          releaseLiveSlot(ctx);
           if (ctx.iframe !== iframe) return;
           ctx.pendingUnload = false;
           setState(ctx, "error");
@@ -1112,6 +1173,7 @@
         ctx.stage.appendChild(iframe);
         ctx.timer = setTimeout(() => {
           releaseSlot(ctx, slot);
+          releaseLiveSlot(ctx);
           if (ctx.state === "loading") {
             showPlaceholder(ctx, {
               spinner: true,
@@ -1122,6 +1184,7 @@
       } catch (err) {
         if (slot !== ctx.activeSlotId) return ctx;
         releaseSlot(ctx, slot);
+        releaseLiveSlot(ctx);
         setState(ctx, "error");
         showPlaceholder(ctx, { text: describeError(err), error: true });
         console.warn("[docsify-yacv]", err);
@@ -1281,6 +1344,8 @@
   function reload(ctx) {
     if (ctx.timer) clearTimeout(ctx.timer);
     ctx.timer = null;
+    if (ctx.liveTimer) clearTimeout(ctx.liveTimer);
+    ctx.liveTimer = null;
     if (ctx.iframe) {
       ctx.iframe.remove();
       ctx.iframe = null;
