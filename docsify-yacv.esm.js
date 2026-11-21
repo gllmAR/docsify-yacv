@@ -396,6 +396,9 @@ function resolveOptions(userOptions = {}, vm = null) {
   merged.lazy = toBool(merged.lazy, true);
   merged.lazyMargin = normalizeMargin(merged.lazyMargin, DEFAULT_OPTIONS.lazyMargin);
   merged.unloadMargin = normalizeMargin(merged.unloadMargin, DEFAULT_OPTIONS.unloadMargin);
+  merged.runtime = merged.runtime === "worker" ? "worker" : "viewer";
+  merged.workerUrl = merged.workerUrl == null ? "" : String(merged.workerUrl);
+  merged.workerWarmup = toBool(merged.workerWarmup, true);
   merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
   merged.maxLiveConcurrent = Math.max(1, Math.floor(toNumber(merged.maxLiveConcurrent, 2)));
   merged.liveSlotMs = Math.max(0, Math.floor(toNumber(merged.liveSlotMs, 3e4)));
@@ -560,6 +563,160 @@ function resolveBase(options, vm) {
   return typeof document !== "undefined" ? document.baseURI : "";
 }
 
+// src/worker-runtime.js
+function decodeBase64(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+var WorkerRuntime = class {
+  /**
+   * @param {string} url Same-origin worker script URL.
+   */
+  constructor(url) {
+    this.url = url;
+    this.worker = null;
+    this.key = "";
+    this.ready = null;
+    this.runId = 0;
+    this.pending = /* @__PURE__ */ new Map();
+    this.chain = Promise.resolve();
+  }
+  /**
+   * @param {{ version: string, debug: boolean, constraints: string }} settings
+   * @returns {Promise<void>}
+   */
+  ensure(settings) {
+    const key = `${settings.version}|${settings.debug ? 1 : 0}|${settings.constraints}`;
+    if (this.worker && this.key === key && this.ready) return this.ready;
+    this.dispose();
+    this.key = key;
+    this.worker = new Worker(this.url, { type: "module" });
+    this.ready = new Promise((resolve, reject) => {
+      const worker = (
+        /** @type {Worker} */
+        this.worker
+      );
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error("Python worker bootstrap timed out"));
+        this.dispose();
+      }, 24e4);
+      worker.onmessage = (event) => {
+        const message = event.data || {};
+        if (message.type === "ready") {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            resolve();
+          }
+          return;
+        }
+        if (message.type === "result" || message.type === "error") {
+          const entry = this.pending.get(message.id);
+          if (!entry) return;
+          this.pending.delete(message.id);
+          if (message.type === "error") {
+            entry.reject(new Error(message.error || "Python worker error"));
+            return;
+          }
+          const models = [];
+          for (const model of message.models || []) {
+            try {
+              const bytes = decodeBase64(String(model.data || ""));
+              models.push({
+                name: String(model.name || "model"),
+                hash: model.hash == null ? null : String(model.hash),
+                bytes
+              });
+            } catch {
+            }
+          }
+          entry.resolve(models);
+          return;
+        }
+        if (message.type === "boot-error" && !settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(new Error(message.error || "Python worker bootstrap failed"));
+          this.dispose();
+        }
+      };
+      worker.onerror = (event) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(new Error(event.message || "Python worker failed to start"));
+        }
+        this.failAll(new Error(event.message || "Python worker failed"));
+        this.dispose();
+      };
+      worker.postMessage({
+        type: "init",
+        version: settings.version,
+        debug: settings.debug,
+        constraints: settings.constraints
+      });
+    });
+    this.ready.catch(() => {
+    });
+    return this.ready;
+  }
+  /**
+   * Runs one snippet. Runs are serialized through the shared interpreter.
+   *
+   * @param {string} code
+   * @param {{ version: string, debug: boolean, constraints: string }} settings
+   * @returns {Promise<WorkerModel[]>}
+   */
+  run(code, settings) {
+    const job = this.chain.then(async () => {
+      await this.ensure(settings);
+      const worker = this.worker;
+      if (!worker) throw new Error("Python worker is not available");
+      const id = ++this.runId;
+      return new Promise((resolve, reject) => {
+        this.pending.set(id, { resolve, reject });
+        worker.postMessage({ type: "run", id, code });
+      });
+    });
+    this.chain = job.then(
+      () => void 0,
+      () => void 0
+    );
+    return job;
+  }
+  /**
+   * @param {Error} error
+   */
+  failAll(error) {
+    for (const { reject } of this.pending.values()) reject(error);
+    this.pending.clear();
+  }
+  dispose() {
+    if (this.worker) {
+      this.worker.onmessage = null;
+      this.worker.onerror = null;
+      this.worker.terminate();
+    }
+    this.worker = null;
+    this.ready = null;
+    this.key = "";
+    this.failAll(new Error("Python worker restarted"));
+  }
+};
+var shared = null;
+function getWorkerRuntime(url) {
+  if (!shared || shared.url !== url) {
+    shared?.dispose();
+    shared = new WorkerRuntime(url);
+  }
+  return shared;
+}
+
 // src/mount.js
 var PROCESSED = "data-yacv-processed";
 var stageContexts = /* @__PURE__ */ new WeakMap();
@@ -706,6 +863,13 @@ function prepareTag(tag, vm, options) {
   }
   finishSetup(ctx);
 }
+function sameOrigin(url) {
+  try {
+    return new URL(url, document.baseURI).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
 function createEmbed(spec, vm, options) {
   const attrs = spec.attrs || {};
   const base = resolveBase(options, vm);
@@ -716,6 +880,19 @@ function createEmbed(spec, vm, options) {
   const version = stringAttr(pick(attrs, "version", "b3dversion", "pgversion", "pg_version")) || options.version;
   const modelCount = spec.models.length + splitList(pick(attrs, "models")).length + splitList(pick(attrs, "src")).length + splitList(pick(attrs, "preview")).length + splitList(pick(attrs, "preload")).length;
   const autoLoad = pick(attrs, "autoload") === void 0 ? options.autoLoad : toBool(pick(attrs, "autoload"), options.autoLoad);
+  const runtimeMode = stringAttr(pick(attrs, "runtime")) || options.runtime;
+  const workerUrl = stringAttr(pick(attrs, "worker", "workerurl")) || options.workerUrl;
+  const workerMode = runtimeMode === "worker" && !!workerUrl && sameOrigin(workerUrl) && sameOrigin(viewer);
+  if (runtimeMode === "worker" && !workerMode) {
+    console.warn(
+      "[docsify-yacv] Worker runtime requires a same-origin viewer and workerUrl; using the per-viewer runtime."
+    );
+  }
+  const workerSettings = {
+    version: options.version,
+    debug: toBool(options.debug, false),
+    constraints: normalizeConstraints(options.constraints || "")
+  };
   const lazy = pick(attrs, "lazy") === void 0 ? options.lazy : toBool(pick(attrs, "lazy"), options.lazy);
   const chrome = pick(attrs, "chrome") === void 0 ? options.chrome : toBool(pick(attrs, "chrome"), options.chrome);
   const container = el("div", "yacv-embed");
@@ -775,6 +952,13 @@ function createEmbed(spec, vm, options) {
     autoLoad,
     lazy,
     chrome,
+    workerMode,
+    workerUrl,
+    workerSettings,
+    workerModels: null,
+    appliedWorkerNames: [],
+    workerPromise: null,
+    openNeedsCode: false,
     timer: null,
     queued: false,
     priority: false,
@@ -809,6 +993,7 @@ function finishSetup(ctx) {
     if (ctx.chrome && ctx.hasCode && hasStaticModels(ctx)) {
       ctx.live = false;
       addRunButton(ctx);
+      if (ctx.workerMode && ctx.hasCode) warmWorkerOnIntent(ctx);
       scheduleLoad(ctx, "The preview loads when it becomes visible.");
       return;
     }
@@ -818,6 +1003,7 @@ function finishSetup(ctx) {
     });
     return;
   }
+  if (ctx.workerMode && ctx.hasCode) warmWorker(ctx);
   scheduleLoad(ctx, "The 3D viewer loads when it becomes visible.");
 }
 function scheduleLoad(ctx, text) {
@@ -989,9 +1175,7 @@ function pickNextIndex() {
       ctx.startPromise = null;
       continue;
     }
-    if (ctx.hasCode && ctx.live !== false && !ctx.liveSlotHeld && liveActive >= maxLiveConcurrent) {
-      continue;
-    }
+    if (needsLiveSlot(ctx) && liveActive >= maxLiveConcurrent) continue;
     const isPriority = !!ctx.priority;
     const distance = distanceToViewport(ctx.stage);
     if (best === -1 || isPriority && !bestPriority || isPriority === bestPriority && distance < bestDistance) {
@@ -1020,8 +1204,11 @@ function releaseSlot(ctx, slot = null) {
   activeLoads = Math.max(0, activeLoads - 1);
   pumpQueue();
 }
+function needsLiveSlot(ctx) {
+  return ctx.hasCode && !ctx.workerMode && ctx.live !== false && !ctx.liveSlotHeld;
+}
 function acquireLiveSlot(ctx) {
-  if (!ctx.hasCode || ctx.live === false || ctx.liveSlotHeld) return true;
+  if (!needsLiveSlot(ctx)) return true;
   if (liveActive >= maxLiveConcurrent) return false;
   ctx.liveSlotHeld = true;
   liveContexts.add(ctx);
@@ -1116,24 +1303,29 @@ function load(ctx, slot = ctx.activeSlotId) {
       }
       if (slot !== ctx.activeSlotId) return ctx;
       const hasCode = !!(code && code.trim());
+      const viewerHasCode = hasCode && !ctx.workerMode;
       if (!hasCode) releaseLiveSlot(ctx);
       if (hasCode) ensureResourceHints(ctx.viewer, true);
-      const params = buildParams({
-        hasCode,
+      let params = buildParams({
+        hasCode: viewerHasCode,
         models: ctx.models,
         attrs: ctx.attrs,
         options: ctx.options,
         base: ctx.base
       });
+      if (!params && ctx.workerMode && hasCode) {
+        params = new URLSearchParams();
+      }
       if (!params) {
         throw new Error("Nothing to show: add build123d code or a .glb/.gltf model.");
       }
-      if (hasCode) params.set("pg_code", await encodeCode(code));
+      if (viewerHasCode) params.set("pg_code", await encodeCode(code));
       if (slot !== ctx.activeSlotId) return ctx;
       const url = buildViewerUrl(ctx.viewer, params);
       ctx.url = url;
+      ctx.openNeedsCode = hasCode && (ctx.workerMode || ctx.live === false);
       const openParams = new URLSearchParams(params);
-      if (hasCode) {
+      if (hasCode && !ctx.openNeedsCode) {
         const settings = ctx.options.settings || {};
         const editorConfigured = ctx.attrs.editor !== void 0 || ctx.attrs["pg-opacity-loading"] !== void 0 || ctx.attrs.pg_opacity_loading !== void 0 || ctx.options.editorExplicit === true || "pg_opacity_loading" in settings || "pg-opacity-loading" in settings || "pgopacityloading" in settings;
         const openEditor = editorConfigured ? params.get("pg_opacity_loading") || "0" : "0.9";
@@ -1160,6 +1352,12 @@ function load(ctx, slot = ctx.activeSlotId) {
           unload(ctx);
           return;
         }
+        if (ctx.workerMode) {
+          setState(ctx, "ready");
+          clearPlaceholder(ctx);
+          void attachWorkerModels(ctx, iframe);
+          return;
+        }
         startLiveHold(ctx);
         setState(ctx, "ready");
         clearPlaceholder(ctx);
@@ -1177,6 +1375,9 @@ function load(ctx, slot = ctx.activeSlotId) {
       });
       ctx.iframe = iframe;
       ctx.stage.appendChild(iframe);
+      if (ctx.workerMode && ctx.live !== false && hasCode && !ctx.workerModels) {
+        void startWorkerRun(ctx);
+      }
       ctx.timer = setTimeout(() => {
         releaseSlot(ctx, slot);
         releaseLiveSlot(ctx);
@@ -1267,6 +1468,110 @@ function createCodePanel(ctx, code) {
   ctx.codeWrap = wrap;
   applyCodeVisibility(ctx);
 }
+function viewerApi(iframe) {
+  try {
+    return iframe.contentWindow && iframe.contentWindow.__b3dLiveViewer;
+  } catch {
+    return null;
+  }
+}
+async function waitForViewerApi(iframe, timeout = 3e3) {
+  const start = performance.now();
+  while (performance.now() - start < timeout) {
+    const api = viewerApi(iframe);
+    if (api) return api;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return null;
+}
+function applyWorkerModels(ctx, api) {
+  if (!ctx.workerMode || !ctx.workerModels || !ctx.workerModels.length) return;
+  const iframe = ctx.iframe;
+  const ViewerBlob = iframe && iframe.contentWindow && iframe.contentWindow.Blob || Blob;
+  const nextNames = /* @__PURE__ */ new Set();
+  for (const model of ctx.workerModels) {
+    nextNames.add(model.name);
+    try {
+      api.loadMesh(new ViewerBlob([model.bytes], { type: "model/gltf-binary" }), model.name);
+    } catch (err) {
+      console.warn("[docsify-yacv] Could not load worker model", model.name, err);
+    }
+  }
+  for (const name of ctx.appliedWorkerNames || []) {
+    if (!nextNames.has(name)) {
+      try {
+        api.removeMesh(name);
+      } catch {
+      }
+    }
+  }
+  ctx.appliedWorkerNames = [...nextNames];
+  ctx.container.setAttribute("data-yacv-worker", "ready");
+}
+async function attachWorkerModels(ctx, iframe) {
+  const api = await waitForViewerApi(iframe, 4e3);
+  if (ctx.iframe !== iframe) return;
+  if (!api) {
+    console.warn(
+      "[docsify-yacv] The viewer does not expose __b3dLiveViewer; falling back to the per-viewer runtime."
+    );
+    ctx.workerMode = false;
+    ctx.openNeedsCode = false;
+    ctx.workerModels = null;
+    reload(ctx);
+    return;
+  }
+  applyWorkerModels(ctx, api);
+  if (ctx.live !== false && !ctx.workerModels && !ctx.workerPromise) {
+    void startWorkerRun(ctx);
+  }
+}
+function startWorkerRun(ctx) {
+  if (!ctx.workerMode || ctx.workerPromise || ctx.workerModels) return ctx.workerPromise;
+  ctx.workerPromise = (async () => {
+    try {
+      const code = await ensureCode(ctx);
+      if (!code || !code.trim()) return;
+      ctx.container.setAttribute("data-yacv-worker", "booting");
+      const models = await getWorkerRuntime(ctx.workerUrl).run(code, ctx.workerSettings);
+      if (!ctx.workerMode) return;
+      ctx.workerModels = models;
+      ctx.container.setAttribute("data-yacv-worker", "ready");
+      if (ctx.iframe) {
+        const api = await waitForViewerApi(ctx.iframe, 5e3);
+        if (api) applyWorkerModels(ctx, api);
+      }
+    } catch (err) {
+      ctx.container.setAttribute("data-yacv-worker", "error");
+      console.warn("[docsify-yacv] Python worker:", err);
+    } finally {
+      ctx.workerPromise = null;
+    }
+  })();
+  return ctx.workerPromise;
+}
+function warmWorkerOnIntent(ctx) {
+  if (ctx.options.workerWarmup === false) return;
+  const start = () => warmWorker(ctx);
+  ctx.container.addEventListener("pointerenter", start, { once: true });
+  ctx.container.addEventListener("pointerdown", start, { once: true });
+  ctx.container.addEventListener("focusin", start, { once: true });
+}
+var warmedWorker = "";
+function warmWorker(ctx) {
+  if (!ctx.workerMode || ctx.options.workerWarmup === false) return;
+  const key = `${ctx.workerUrl}|${ctx.workerSettings.version}|${ctx.workerSettings.debug}|${ctx.workerSettings.constraints}`;
+  if (warmedWorker === key) return;
+  warmedWorker = key;
+  const start = () => {
+    getWorkerRuntime(ctx.workerUrl).ensure(ctx.workerSettings).catch((err) => {
+      ctx.container.setAttribute("data-yacv-worker", "error");
+      console.warn("[docsify-yacv] Python worker warmup failed:", err);
+    });
+  };
+  if (typeof requestIdleCallback === "function") requestIdleCallback(start, { timeout: 2e3 });
+  else setTimeout(start, 800);
+}
 function addRunButton(ctx) {
   if (!ctx.chrome || !ctx.actions) return;
   const btn = el("button", "yacv-btn");
@@ -1277,9 +1582,21 @@ function addRunButton(ctx) {
   const label = el("span");
   label.textContent = "Run build123d";
   btn.appendChild(label);
-  btn.addEventListener("click", () => {
-    btn.remove();
+  btn.addEventListener("click", async () => {
     ctx.live = true;
+    if (ctx.workerMode) {
+      btn.disabled = true;
+      const text = btn.querySelector("span");
+      if (text) text.textContent = "Building\u2026";
+      try {
+        await ensureLoaded(ctx);
+        await startWorkerRun(ctx);
+      } finally {
+        btn.remove();
+      }
+      return;
+    }
+    btn.remove();
     reload(ctx);
   });
   ctx.actions.insertBefore(btn, ctx.actions.firstChild);
@@ -1312,7 +1629,7 @@ function addOpenButton(ctx) {
   label.textContent = "Open";
   btn.appendChild(label);
   btn.addEventListener("click", async () => {
-    const previewOnly = ctx.live === false && ctx.hasCode;
+    const previewOnly = ctx.openNeedsCode || ctx.live === false && ctx.hasCode;
     if (!previewOnly) {
       const openUrl = ctx.openUrl || ctx.url;
       if (openUrl) {
@@ -1328,6 +1645,7 @@ function addOpenButton(ctx) {
         try {
           url = await buildLiveOpenUrl(ctx) || url;
           ctx.openUrl = url;
+          ctx.openNeedsCode = false;
         } catch (err) {
           console.warn("[docsify-yacv] Could not build the Open URL:", err);
         }

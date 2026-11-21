@@ -22,6 +22,11 @@ It is built from the patched viewer used by
 Python mode only when the URL hash contains `pg_code`; static/preview embeds run
 in mesh mode and never bootstrap Pyodide.
 
+`yacv-worker.js` is docsify-yacv's shared, same-origin module worker. It runs
+the patched `PlaygroundStartup.py` once and executes every live embed in that
+interpreter (inspired by b3d-live's persistent Python worker), returning GLBs
+through the mesh API.
+
 To update it, rebuild the viewer with the patches from the b3d-live repository
 (`scripts/vendor-yacv.sh`, `patches/0003-headless-viewer-mode.patch`,
 `patches/0006-fast-python-bootstrap.patch`, `scripts/prune-viewer.mjs`) and keep

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>docsify-yacv worker e2e</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      window.$docsify = {
+        name: 'worker e2e',
+        homepage: 'worker.md',
+        basePath: '/',
+        yacv: {
+          viewer: '/worker-viewer-stub.html',
+          openViewer: '/worker-viewer-stub.html?open=1',
+          runtime: 'worker',
+          workerUrl: '/fake-worker.js',
+          version: '0.9.1',
+          lazy: false,
+          unloadOffscreen: false,
+          workerWarmup: false,
+        },
+      };
+    </script>
+    <script src="/docsify.min.js"></script>
+    <script src="/docsify-yacv.js"></script>
+  </body>
+</html>

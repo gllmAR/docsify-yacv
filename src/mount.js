@@ -2,8 +2,9 @@ import { encodeCode } from './encode.js';
 import { ensureResourceHints } from './hints.js';
 import { highlightPrePython, highlightPython } from './highlight.js';
 import { classifyFence, looksLikePython, parseInfoString, parseModelBlock } from './parse.js';
-import { buildParams, buildViewerUrl, parseShowCode, resolveBase } from './url.js';
+import { buildParams, buildViewerUrl, normalizeConstraints, parseShowCode, resolveBase } from './url.js';
 import { copyText, cssSize, normalizeKey, resolveUrl, splitList, toBool } from './util.js';
+import { getWorkerRuntime } from './worker-runtime.js';
 
 const PROCESSED = 'data-yacv-processed';
 
@@ -215,6 +216,18 @@ function prepareTag(tag, vm, options) {
 }
 
 /**
+ * @param {string} url
+ * @returns {boolean}
+ */
+function sameOrigin(url) {
+  try {
+    return new URL(url, document.baseURI).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * @param {Object} spec
  * @param {Record<string, any>} spec.attrs
  * @param {string | null} spec.code
@@ -244,6 +257,24 @@ function createEmbed(spec, vm, options) {
     splitList(pick(attrs, 'preview')).length +
     splitList(pick(attrs, 'preload')).length;
   const autoLoad = pick(attrs, 'autoload') === undefined ? options.autoLoad : toBool(pick(attrs, 'autoload'), options.autoLoad);
+  const runtimeMode = stringAttr(pick(attrs, 'runtime')) || options.runtime;
+  const workerUrl = stringAttr(pick(attrs, 'worker', 'workerurl')) || options.workerUrl;
+  const workerMode =
+    runtimeMode === 'worker' && !!workerUrl && sameOrigin(workerUrl) && sameOrigin(viewer);
+  if (runtimeMode === 'worker' && !workerMode) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[docsify-yacv] Worker runtime requires a same-origin viewer and workerUrl; using the per-viewer runtime.',
+    );
+  }
+  // The shared worker has one interpreter, so it uses the page-wide settings.
+  // Per-embed version/debug/constraints require `runtime=viewer` (or a separate
+  // page/worker).
+  const workerSettings = {
+    version: options.version,
+    debug: toBool(options.debug, false),
+    constraints: normalizeConstraints(options.constraints || ''),
+  };
   const lazy = pick(attrs, 'lazy') === undefined ? options.lazy : toBool(pick(attrs, 'lazy'), options.lazy);
   const chrome = pick(attrs, 'chrome') === undefined ? options.chrome : toBool(pick(attrs, 'chrome'), options.chrome);
 
@@ -311,6 +342,13 @@ function createEmbed(spec, vm, options) {
     autoLoad,
     lazy,
     chrome,
+    workerMode,
+    workerUrl,
+    workerSettings,
+    workerModels: null,
+    appliedWorkerNames: [],
+    workerPromise: null,
+    openNeedsCode: false,
     timer: null,
     queued: false,
     priority: false,
@@ -368,6 +406,7 @@ function finishSetup(ctx) {
     if (ctx.chrome && ctx.hasCode && hasStaticModels(ctx)) {
       ctx.live = false;
       addRunButton(ctx);
+      if (ctx.workerMode && ctx.hasCode) warmWorkerOnIntent(ctx);
       scheduleLoad(ctx, 'The preview loads when it becomes visible.');
       return;
     }
@@ -377,6 +416,9 @@ function finishSetup(ctx) {
     });
     return;
   }
+
+  // Auto-load live embeds can warm the shared worker while the reader arrives.
+  if (ctx.workerMode && ctx.hasCode) warmWorker(ctx);
   scheduleLoad(ctx, 'The 3D viewer loads when it becomes visible.');
 }
 
@@ -612,9 +654,7 @@ function pickNextIndex() {
       ctx.startPromise = null;
       continue;
     }
-    if (ctx.hasCode && ctx.live !== false && !ctx.liveSlotHeld && liveActive >= maxLiveConcurrent) {
-      continue;
-    }
+    if (needsLiveSlot(ctx) && liveActive >= maxLiveConcurrent) continue;
     const isPriority = !!ctx.priority;
     const distance = distanceToViewport(ctx.stage);
     if (best === -1 || (isPriority && !bestPriority) || (isPriority === bestPriority && distance < bestDistance)) {
@@ -662,8 +702,16 @@ function releaseSlot(ctx, slot = null) {
  * @param {EmbedContext} ctx
  * @returns {boolean}
  */
+function needsLiveSlot(ctx) {
+  return ctx.hasCode && !ctx.workerMode && ctx.live !== false && !ctx.liveSlotHeld;
+}
+
+/**
+ * @param {EmbedContext} ctx
+ * @returns {boolean}
+ */
 function acquireLiveSlot(ctx) {
-  if (!ctx.hasCode || ctx.live === false || ctx.liveSlotHeld) return true;
+  if (!needsLiveSlot(ctx)) return true;
   if (liveActive >= maxLiveConcurrent) return false;
   ctx.liveSlotHeld = true;
   liveContexts.add(ctx);
@@ -799,19 +847,24 @@ function load(ctx, slot = ctx.activeSlotId) {
       if (slot !== ctx.activeSlotId) return ctx; // aborted by reload/unload
 
       const hasCode = !!(code && code.trim());
+      const viewerHasCode = hasCode && !ctx.workerMode;
       if (!hasCode) releaseLiveSlot(ctx);
       if (hasCode) ensureResourceHints(ctx.viewer, true);
-      const params = buildParams({
-        hasCode,
+      let params = buildParams({
+        hasCode: viewerHasCode,
         models: ctx.models,
         attrs: ctx.attrs,
         options: ctx.options,
         base: ctx.base,
       });
+      if (!params && ctx.workerMode && hasCode) {
+        // The mesh viewer starts empty; the shared worker feeds it after boot.
+        params = new URLSearchParams();
+      }
       if (!params) {
         throw new Error('Nothing to show: add build123d code or a .glb/.gltf model.');
       }
-      if (hasCode) params.set('pg_code', await encodeCode(code));
+      if (viewerHasCode) params.set('pg_code', await encodeCode(code));
       if (slot !== ctx.activeSlotId) return ctx; // aborted while encoding
 
       const url = buildViewerUrl(ctx.viewer, params);
@@ -819,11 +872,12 @@ function load(ctx, slot = ctx.activeSlotId) {
 
       // The embedded viewer hides the Monaco editor (docsify shows the code).
       // "Open" should give access to the full playground, so unless the editor
-      // opacity was configured explicitly, show it in the new tab. Preview-only
-      // embeds build their live Open URL lazily in the Open button handler, so
-      // the preview itself never waits for the code.
+      // opacity was configured explicitly, show it in the new tab. Worker-mode
+      // and preview-only embeds build that URL lazily in the Open button handler,
+      // so their preview never waits for the code.
+      ctx.openNeedsCode = hasCode && (ctx.workerMode || ctx.live === false);
       const openParams = new URLSearchParams(params);
-      if (hasCode) {
+      if (hasCode && !ctx.openNeedsCode) {
         const settings = ctx.options.settings || {};
         const editorConfigured =
           ctx.attrs.editor !== undefined ||
@@ -858,6 +912,12 @@ function load(ctx, slot = ctx.activeSlotId) {
           unload(ctx);
           return;
         }
+        if (ctx.workerMode) {
+          setState(ctx, 'ready');
+          clearPlaceholder(ctx);
+          void attachWorkerModels(ctx, iframe);
+          return;
+        }
         startLiveHold(ctx);
         setState(ctx, 'ready');
         clearPlaceholder(ctx);
@@ -876,6 +936,10 @@ function load(ctx, slot = ctx.activeSlotId) {
 
       ctx.iframe = iframe;
       ctx.stage.appendChild(iframe);
+
+      if (ctx.workerMode && ctx.live !== false && hasCode && !ctx.workerModels) {
+        void startWorkerRun(ctx);
+      }
 
       // Surface very slow loads instead of an infinite spinner.
       ctx.timer = setTimeout(() => {
@@ -992,6 +1056,166 @@ function createCodePanel(ctx, code) {
 }
 
 /**
+ * Reads the same-origin viewer API once the app has mounted.
+ *
+ * @param {HTMLIFrameElement} iframe
+ * @returns {any | null}
+ */
+function viewerApi(iframe) {
+  try {
+    return iframe.contentWindow && iframe.contentWindow.__b3dLiveViewer;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {HTMLIFrameElement} iframe
+ * @param {number} [timeout]
+ * @returns {Promise<any | null>}
+ */
+async function waitForViewerApi(iframe, timeout = 3000) {
+  const start = performance.now();
+  while (performance.now() - start < timeout) {
+    const api = viewerApi(iframe);
+    if (api) return api;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  return null;
+}
+
+/**
+ * @param {EmbedContext} ctx
+ * @param {any} api
+ */
+function applyWorkerModels(ctx, api) {
+  if (!ctx.workerMode || !ctx.workerModels || !ctx.workerModels.length) return;
+  const iframe = ctx.iframe;
+  const ViewerBlob = (iframe && iframe.contentWindow && iframe.contentWindow.Blob) || Blob;
+  const nextNames = new Set();
+  for (const model of ctx.workerModels) {
+    nextNames.add(model.name);
+    try {
+      // Construct the Blob in the viewer realm: a Blob created in the parent
+      // frame fails `instanceof Blob` inside the iframe and is treated as a URL.
+      api.loadMesh(new ViewerBlob([model.bytes], { type: 'model/gltf-binary' }), model.name);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[docsify-yacv] Could not load worker model', model.name, err);
+    }
+  }
+  // Drop models from a previous run that are not part of the new result.
+  for (const name of ctx.appliedWorkerNames || []) {
+    if (!nextNames.has(name)) {
+      try {
+        api.removeMesh(name);
+      } catch {
+        // ignore
+      }
+    }
+  }
+  ctx.appliedWorkerNames = [...nextNames];
+  ctx.container.setAttribute('data-yacv-worker', 'ready');
+}
+
+/**
+ * Applies worker output to a freshly loaded mesh viewer. Falls back to the
+ * per-viewer runtime when the same-origin viewer does not expose the API.
+ *
+ * @param {EmbedContext} ctx
+ * @param {HTMLIFrameElement} iframe
+ */
+async function attachWorkerModels(ctx, iframe) {
+  const api = await waitForViewerApi(iframe, 4000);
+  if (ctx.iframe !== iframe) return;
+  if (!api) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[docsify-yacv] The viewer does not expose __b3dLiveViewer; falling back to the per-viewer runtime.',
+    );
+    ctx.workerMode = false;
+    ctx.openNeedsCode = false;
+    ctx.workerModels = null;
+    reload(ctx);
+    return;
+  }
+  applyWorkerModels(ctx, api);
+  if (ctx.live !== false && !ctx.workerModels && !ctx.workerPromise) {
+    void startWorkerRun(ctx);
+  }
+}
+
+/**
+ * Runs this embed's code in the shared Python worker and applies the resulting
+ * GLBs to the mesh viewer.
+ *
+ * @param {EmbedContext} ctx
+ * @returns {Promise<void> | null}
+ */
+function startWorkerRun(ctx) {
+  if (!ctx.workerMode || ctx.workerPromise || ctx.workerModels) return ctx.workerPromise;
+  ctx.workerPromise = (async () => {
+    try {
+      const code = await ensureCode(ctx);
+      if (!code || !code.trim()) return;
+      ctx.container.setAttribute('data-yacv-worker', 'booting');
+      const models = await getWorkerRuntime(ctx.workerUrl).run(code, ctx.workerSettings);
+      if (!ctx.workerMode) return; // fell back to the viewer runtime meanwhile
+      ctx.workerModels = models;
+      ctx.container.setAttribute('data-yacv-worker', 'ready');
+      if (ctx.iframe) {
+        const api = await waitForViewerApi(ctx.iframe, 5000);
+        if (api) applyWorkerModels(ctx, api);
+      }
+    } catch (err) {
+      ctx.container.setAttribute('data-yacv-worker', 'error');
+      // eslint-disable-next-line no-console
+      console.warn('[docsify-yacv] Python worker:', err);
+    } finally {
+      ctx.workerPromise = null;
+    }
+  })();
+  return ctx.workerPromise;
+}
+
+/**
+ * Warms the shared worker when the reader shows intent (preview-only embeds).
+ *
+ * @param {EmbedContext} ctx
+ */
+function warmWorkerOnIntent(ctx) {
+  if (ctx.options.workerWarmup === false) return;
+  const start = () => warmWorker(ctx);
+  ctx.container.addEventListener('pointerenter', start, { once: true });
+  ctx.container.addEventListener('pointerdown', start, { once: true });
+  ctx.container.addEventListener('focusin', start, { once: true });
+}
+
+/**
+ * Warms the shared worker without running code (on an idle callback).
+ *
+ * @param {EmbedContext} ctx
+ */
+let warmedWorker = '';
+function warmWorker(ctx) {
+  if (!ctx.workerMode || ctx.options.workerWarmup === false) return;
+  const key = `${ctx.workerUrl}|${ctx.workerSettings.version}|${ctx.workerSettings.debug}|${ctx.workerSettings.constraints}`;
+  if (warmedWorker === key) return;
+  warmedWorker = key;
+  const start = () => {
+    getWorkerRuntime(ctx.workerUrl)
+      .ensure(ctx.workerSettings)
+      .catch(err => {
+        ctx.container.setAttribute('data-yacv-worker', 'error');
+        // eslint-disable-next-line no-console
+        console.warn('[docsify-yacv] Python worker warmup failed:', err);
+      });
+  };
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(start, { timeout: 2000 });
+  else setTimeout(start, 800);
+}
+
+/**
  * Starts the full live sandbox for preview-only embeds (auto-load=false).
  *
  * @param {EmbedContext} ctx
@@ -1006,9 +1230,21 @@ function addRunButton(ctx) {
   const label = el('span');
   label.textContent = 'Run build123d';
   btn.appendChild(label);
-  btn.addEventListener('click', () => {
-    btn.remove();
+  btn.addEventListener('click', async () => {
     ctx.live = true;
+    if (ctx.workerMode) {
+      btn.disabled = true;
+      const text = btn.querySelector('span');
+      if (text) text.textContent = 'Building…';
+      try {
+        await ensureLoaded(ctx);
+        await startWorkerRun(ctx);
+      } finally {
+        btn.remove();
+      }
+      return;
+    }
+    btn.remove();
     reload(ctx);
   });
   ctx.actions.insertBefore(btn, ctx.actions.firstChild);
@@ -1061,7 +1297,7 @@ function addOpenButton(ctx) {
   label.textContent = 'Open';
   btn.appendChild(label);
   btn.addEventListener('click', async () => {
-    const previewOnly = ctx.live === false && ctx.hasCode;
+    const previewOnly = ctx.openNeedsCode || (ctx.live === false && ctx.hasCode);
     if (!previewOnly) {
       const openUrl = ctx.openUrl || ctx.url;
       if (openUrl) {
@@ -1079,6 +1315,7 @@ function addOpenButton(ctx) {
         try {
           url = (await buildLiveOpenUrl(ctx)) || url;
           ctx.openUrl = url;
+          ctx.openNeedsCode = false;
         } catch (err) {
           // eslint-disable-next-line no-console
           console.warn('[docsify-yacv] Could not build the Open URL:', err);

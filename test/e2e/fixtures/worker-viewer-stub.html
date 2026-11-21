@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>worker viewer stub</title>
+  </head>
+  <body style="margin: 0; background: #888">
+    <script>
+      window.__b3dLiveMode = 'mesh';
+      window.__loaded = [];
+      window.__removed = [];
+      window.__b3dLiveViewer = {
+        mode: 'mesh',
+        loadMesh(source, name) {
+          window.__loaded.push({
+            name,
+            type: source && source.constructor && source.constructor.name,
+            size: source && source.size,
+          });
+        },
+        removeMesh(name) {
+          window.__removed.push(name);
+        },
+      };
+    </script>
+  </body>
+</html>

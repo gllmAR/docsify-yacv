@@ -9,6 +9,10 @@ noticeably faster. See [performance notes](reference.md?id=performance-and-limit
 > `auto-load=false` so the sandbox starts only when the reader clicks **Run build123d**.
 >
 > Add `vertices=False` to `show()` for a cleaner embed; yacv draws small vertex markers by default.
+>
+> These examples use the shared Python worker (`runtime: 'worker'`), so they all share one
+> interpreter. Examples that pin a build123d version, change constraints/debug wheels, or open the
+> in-iframe Monaco editor use `runtime=viewer` because the worker has one page-wide configuration.
 
 ## A parametric part
 
@@ -87,7 +91,7 @@ show_object(part)
 By default the sandbox installs the latest stable build123d. Use `version` to pin a PyPI release,
 or to test a GitHub branch / tag / commit / pull request:
 
-```build123d version=dev height=360 title="build123d dev branch"
+```build123d version=dev runtime=viewer height=360 title="build123d dev branch"
 from build123d import *
 
 with BuildPart() as cube:
@@ -112,7 +116,7 @@ show(cube)
 `debug` installs OCP.wasm debug wheels (newer dev builds, better crash reports; slower).
 `constraints` passes pip constraints for every package the sandbox installs:
 
-```build123d debug constraints="numpy<2;packaging>=24" height=340 title="Pinned sandbox dependencies"
+```build123d debug constraints="numpy<2;packaging>=24" runtime=viewer height=340 title="Pinned sandbox dependencies"
 from build123d import *
 import numpy
 
@@ -146,7 +150,7 @@ By default the in-iframe Monaco editor is hidden (`editor=0`) and docsify displa
 above the viewer. Set `editor` to an opacity between `0` and `1` to show the editor instead, e.g.
 `editor=0.9`, or `editor=show`:
 
-```build123d editor=0.85 height=520 title="Editable sandbox inside the iframe"
+```build123d editor=0.85 runtime=viewer viewer="https://yeicor-3d.github.io/yet-another-cad-viewer/" height=520 title="Editable sandbox inside the iframe"
 from build123d import *
 
 with BuildPart() as knob:

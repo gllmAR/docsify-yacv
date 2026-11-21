@@ -49,6 +49,17 @@ export interface DocsifyYacvOptions {
   lazy?: boolean;
   /** How far before the viewport lazy embeds start loading. Default: "200px". */
   lazyMargin?: string | number;
+  /**
+   * `"viewer"` (default) runs build123d inside each viewer iframe. `"worker"`
+   * runs one shared same-origin Python worker for every live embed. Worker mode
+   * requires a same-origin viewer exposing `__b3dLiveViewer` (the bundled
+   * `viewer/` build) and `workerUrl`.
+   */
+  runtime?: 'viewer' | 'worker';
+  /** Same-origin module worker for `runtime: "worker"`. */
+  workerUrl?: string;
+  /** Pre-boot the shared worker on idle when a live embed exists. Default: true. */
+  workerWarmup?: boolean;
   /** Maximum number of iframes created at the same time. Default: 2. */
   maxConcurrent?: number;
   /**

@@ -42,6 +42,8 @@ Python code block. The same Markdown works everywhere.
   unloading of far-offscreen viewers, and one viewer app per fence instead of per model.
 - **Optimized embedded viewer** — the repo ships a headless, pruned yacv build: no Monaco, drawers
   closed, full-canvas 3D and a ~6s faster Python bootstrap.
+- **Shared Python worker** — optionally run every live embed on a page in **one** Pyodide instance.
+  First boot ~20s, then each example renders in well under a second and the preview stays visible.
 - **No build, static hosting** — the plugin is a single root-level `docsify-yacv.js`, committed and
   served as-is. The repository root is the docsify demo.
 
@@ -216,6 +218,9 @@ window.$docsify = {
 | ------ | ------- | ----------- |
 | `viewer` | `https://gllmar.github.io/docsify-yacv/viewer/` | Headless optimized viewer for embeds (absolute or relative). |
 | `openViewer` | `https://yeicor-3d.github.io/yet-another-cad-viewer/` | Viewer used by the **Open** action (full upstream build with the editor). |
+| `runtime` | `viewer` | `viewer` (Pyodide per embed) or `worker` (one shared same-origin worker). |
+| `workerUrl` | `''` | Module worker for `runtime: 'worker'` (e.g. `./viewer/yacv-worker.js`). |
+| `workerWarmup` | `true` | Pre-boot the shared worker on idle when a live embed exists. |
 | `height` | `480px` | Default stage height (number = px, CSS length, or `auto`). |
 | `title` | `''` | Default toolbar title. |
 | `version` | `stable` | build123d version for live code. |
@@ -292,7 +297,9 @@ Measured on the live demo with a warm browser cache (Chromium, M1-class machine)
 | Static `yacv` model (GLB) | ~2–3s (optimized viewer), ~3s upstream |
 | Live build123d **with `preview`** | preview in ~2–3s; live geometry replaces it when the sandbox finishes |
 | Live build123d **with `preview` + `auto-load=false`** | preview in ~2–3s; sandbox starts only on **Run build123d** |
-| Live build123d, optimized viewer | **~15s** warm cache |
+| Live build123d, optimized viewer (per-viewer runtime) | **~15s** warm cache |
+| Live build123d, shared worker, **first** example | ~20s (boot) |
+| Live build123d, shared worker, **later** examples | **~0.5–1s** |
 | Live build123d, upstream viewer | ~21–30s (includes Monaco) |
 
 The live sandbox cost is dominated by Pyodide boot plus installing/importing build123d, OCP and the
@@ -321,7 +328,7 @@ index.html          docsify demo
 README.md           demo home / this documentation
 docsify-yacv.js     the plugin (committed IIFE, auto-registering)
 docsify-yacv.esm.js ESM entry for npm/bundlers
-viewer/             optimized headless yacv build (see viewer/NOTICE.md)
+viewer/             optimized headless yacv + shared Python worker (see viewer/NOTICE.md)
 build123d.md        docs pages
 models.md
 reference.md

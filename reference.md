@@ -31,6 +31,9 @@ window.$docsify = {
 | -------------- | ------------------- | ------------------------------------------------ | ----------- |
 | `viewer`       | `string`            | `https://gllmar.github.io/docsify-yacv/viewer/`  | Headless optimized yacv for embeds (absolute or relative). |
 | `openViewer`   | `string`            | `https://yeicor-3d.github.io/yet-another-cad-viewer/` | Viewer used by the **Open** action (full upstream build with the editor). |
+| `runtime`      | `'viewer' \| 'worker'` | `viewer`                                     | Pyodide per embed, or one shared same-origin worker. |
+| `workerUrl`    | `string`            | `''`                                             | Module worker for `runtime: 'worker'`. |
+| `workerWarmup` | `boolean`           | `true`                                           | Pre-boot the shared worker on idle. |
 | `height`       | `number \| string`  | `480px`                                          | Default viewer height. Numbers are pixels; `auto` uses a 4:3 area. |
 | `title`        | `string`            | `''`                                             | Default toolbar title. |
 | `version`      | `string`            | `stable`                                         | build123d version for live code (`stable`, `0.9.1`, `dev`, `pull/123/head`, ...). |
@@ -79,6 +82,7 @@ show(Box(10, 10, 10))
 | `chrome`          |                            | Override the global toolbar setting. |
 | `open`            |                            | `false` hides the **Open** action. |
 | `viewer`          |                            | Override the viewer URL for this embed. |
+| `runtime`         |                            | `viewer` or `worker` for this embed (worker mode uses the page-wide settings). |
 
 Any [yacv setting](#yacv-settings) can also be used as an attribute (case-insensitive, dashes and
 underscores are ignored): `edgeWidth=2`, `autoplay=false`, `pg_opacity_loaded=0.5`, ...
@@ -195,6 +199,34 @@ window.$docsify = {
 
 Set `viewer` to the upstream URL if you need the in-page Monaco editor (`editor` option).
 
+## Shared worker runtime
+
+With `runtime: 'worker'`, `viewer/` runs in mesh mode and `viewer/yacv-worker.js` executes all live
+code in **one** Pyodide instance. The worker returns GLB bytes, which are handed to each viewer via
+`window.__b3dLiveViewer.loadMesh`.
+
+```js
+window.$docsify = {
+  yacv: {
+    viewer: './viewer/',
+    openViewer: 'https://yeicor-3d.github.io/yet-another-cad-viewer/',
+    runtime: 'worker',
+    workerUrl: './viewer/yacv-worker.js',
+  },
+};
+```
+
+Requirements and limits:
+
+- viewer and worker must be same-origin (the plugin reads the viewer API from the iframe);
+- the worker boots once per page: first run ~20s (warm cache), later runs ~0.5–1s;
+- the worker uses the page-wide `version`, `debug` and `constraints`; use `runtime=viewer` on an
+  embed that needs different settings;
+- each run is isolated (user globals are removed), and `yacv.clear()` runs before the snippet;
+- `workerWarmup: true` (default) pre-boots on idle for auto-load live embeds; preview-only
+  embeds warm on pointer/focus intent so `auto-load=false` is respected; `false` disables it;
+- `maxLiveConcurrent` is ignored in worker mode.
+
 ## Time to interactive
 
 Measured on the live demo with a warm cache (Chromium, M1-class machine):
@@ -204,7 +236,9 @@ Measured on the live demo with a warm cache (Chromium, M1-class machine):
 | Static GLB (`yacv` fence) | ~2–3s |
 | Live build123d + `preview` GLB | ~2–3s, replaced by live geometry when the sandbox finishes |
 | Live build123d + `preview` + `auto-load=false` | ~2–3s; sandbox starts on **Run build123d** |
-| Live build123d, optimized viewer | **~15s** |
+| Live build123d, optimized viewer (per-viewer runtime) | **~15s** |
+| Live build123d, shared worker, first example | ~20s (boot) |
+| Live build123d, shared worker, later examples | **~0.5–1s** |
 | Live build123d, upstream viewer | ~21–30s (includes Monaco) |
 
 The live cost is Pyodide boot plus installing/importing build123d, OCP.wasm and the scientific

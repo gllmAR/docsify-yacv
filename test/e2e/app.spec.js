@@ -281,6 +281,40 @@ test.describe('docsify-yacv', () => {
     await expect(page.locator('.yacv-embed iframe')).toHaveCount(2, { timeout: 10000 });
   });
 
+  test('runs live embeds in a shared same-origin worker (mesh viewer)', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__yacvOpened = [];
+      window.open = url => {
+        window.__yacvOpened.push(String(url));
+        return null;
+      };
+    });
+    await page.goto('/index-worker.html');
+    const embed = page.locator('.yacv-embed');
+    await expect(embed).toHaveCount(1);
+    const iframe = embed.locator('iframe');
+    await expect(iframe).toHaveCount(1);
+    const src = await iframe.getAttribute('src');
+    expect(src).toContain('/worker-viewer-stub.html');
+    expect(src).not.toContain('pg_code');
+
+    await expect(embed).toHaveAttribute('data-yacv-worker', 'ready');
+    const loaded = await iframe.evaluate(frame => frame.contentWindow.__loaded);
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].name).toBe('part');
+    expect(loaded[0].type).toBe('Blob');
+    expect(loaded[0].size).toBeGreaterThan(0);
+
+    await embed.getByRole('button', { name: 'Open' }).click();
+    await expect
+      .poll(() => page.evaluate(() => window.__yacvOpened.find(url => url) || ''), { timeout: 5000 })
+      .not.toBe('');
+    const opened = await page.evaluate(() => window.__yacvOpened.find(url => url) || null);
+    expect(opened).toContain('open=1');
+    expect(viewerParams(opened).get('pg_code')).toBeTruthy();
+    expect(viewerParams(opened).get('pg_opacity_loading')).toBe('0.9');
+  });
+
   test('limits concurrent iframe loads (maxConcurrent)', async ({ page }) => {
     await page.request.get('/reset-stats');
     await page.goto('/index-concurrency.html');

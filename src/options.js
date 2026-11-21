@@ -159,6 +159,9 @@ export function resolveOptions(userOptions = {}, vm = null) {
   merged.lazy = toBool(merged.lazy, true);
   merged.lazyMargin = normalizeMargin(merged.lazyMargin, DEFAULT_OPTIONS.lazyMargin);
   merged.unloadMargin = normalizeMargin(merged.unloadMargin, DEFAULT_OPTIONS.unloadMargin);
+  merged.runtime = merged.runtime === 'worker' ? 'worker' : 'viewer';
+  merged.workerUrl = merged.workerUrl == null ? '' : String(merged.workerUrl);
+  merged.workerWarmup = toBool(merged.workerWarmup, true);
   merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
   merged.maxLiveConcurrent = Math.max(1, Math.floor(toNumber(merged.maxLiveConcurrent, 2)));
   merged.liveSlotMs = Math.max(0, Math.floor(toNumber(merged.liveSlotMs, 30000)));
@@ -228,6 +231,9 @@ export function normalizeEditor(value, fallback = 0) {
  * @property {number | string | boolean} [editor] In-iframe playground editor opacity (0 = hidden).
  * @property {boolean} [lazy] Only create the iframe when scrolled into view.
  * @property {string | number} [lazyMargin] Viewport margin for lazy loading (px or %).
+ * @property {'viewer' | 'worker'} [runtime] Python runtime: per-viewer or shared worker.
+ * @property {string} [workerUrl] Same-origin module worker for `runtime: 'worker'`.
+ * @property {boolean} [workerWarmup] Pre-boot the shared worker on idle.
  * @property {number} [maxConcurrent] Maximum simultaneous iframe creations.
  * @property {number} [maxLiveConcurrent] Maximum loaded live build123d sandboxes.
  * @property {number} [liveSlotMs] How long a live sandbox holds its slot (`0` = until unload).

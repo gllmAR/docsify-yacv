@@ -23,6 +23,9 @@ test('resolveOptions: defaults', () => {
   assert.equal(options.maxConcurrent, 2);
   assert.equal(options.maxLiveConcurrent, 2);
   assert.equal(options.liveSlotMs, 30000);
+  assert.equal(options.runtime, 'viewer');
+  assert.equal(options.workerUrl, '');
+  assert.equal(options.workerWarmup, true);
   assert.equal(options.unloadOffscreen, true);
   assert.equal(options.unloadMargin, '100% 0px');
   assert.equal(options.autoLoad, true);
@@ -71,6 +74,14 @@ test('resolveOptions: openViewer is independent of viewer', () => {
   assert.equal(options.viewer, '/embed/');
   assert.equal(options.openViewer, 'https://full.example/');
   assert.equal(resolveOptions({ viewer: '/embed/' }).openViewer, DEFAULT_OPEN_VIEWER);
+});
+
+test('resolveOptions: shared worker options', () => {
+  const options = resolveOptions({ runtime: 'worker', workerUrl: './viewer/yacv-worker.js', workerWarmup: false });
+  assert.equal(options.runtime, 'worker');
+  assert.equal(options.workerUrl, './viewer/yacv-worker.js');
+  assert.equal(options.workerWarmup, false);
+  assert.equal(resolveOptions({ runtime: 'nope' }).runtime, 'viewer');
 });
 
 test('resolveOptions: marks editor as explicit only when configured', () => {

@@ -44,6 +44,11 @@
           viewer: params.get('viewer') || './viewer/',
           // "Open" uses the full upstream viewer so readers can edit code there.
           openViewer: 'https://yeicor-3d.github.io/yet-another-cad-viewer/',
+          // One shared Python worker serves every live example on the page
+          // (requires the same-origin ./viewer/ build). Run `npm run demo` or
+          // open the GitHub Pages demo to try it.
+          runtime: 'worker',
+          workerUrl: './viewer/yacv-worker.js',
           version: 'stable',
           height: '460px',
           settings: {
