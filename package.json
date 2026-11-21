@@ -1,0 +1,78 @@
+{
+  "name": "docsify-yacv",
+  "version": "0.1.0",
+  "description": "Yet Another CAD Viewer (yacv) plugin for docsify 5 with first-class build123d support: live in-browser build123d playgrounds and static GLB/GLTF models.",
+  "license": "MIT",
+  "author": "Gllmar",
+  "type": "module",
+  "main": "dist/docsify-yacv.js",
+  "module": "dist/docsify-yacv.esm.js",
+  "types": "types/index.d.ts",
+  "unpkg": "dist/docsify-yacv.min.js",
+  "jsdelivr": "dist/docsify-yacv.min.js",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "import": "./dist/docsify-yacv.esm.js",
+      "default": "./dist/docsify-yacv.esm.js"
+    },
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "types",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "docsify",
+    "docsify-plugin",
+    "yacv",
+    "yet-another-cad-viewer",
+    "build123d",
+    "cad",
+    "cadquery",
+    "ocp",
+    "gltf",
+    "glb",
+    "3d",
+    "viewer",
+    "documentation"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gllmAR/docsify-yacv.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gllmAR/docsify-yacv/issues"
+  },
+  "homepage": "https://github.com/gllmAR/docsify-yacv#readme",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "demo": "node scripts/serve-demo.mjs",
+    "demo:models": "node scripts/make-demo-glb.mjs",
+    "test": "node --test test/unit/",
+    "test:e2e": "npm run build && playwright test",
+    "test:all": "npm test && npm run test:e2e",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "docsify": ">=4.12.0"
+  },
+  "peerDependenciesMeta": {
+    "docsify": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "docsify": "^5.1.0",
+    "docsify4": "npm:docsify@^4.13.1",
+    "esbuild": "^0.28.2"
+  }
+}

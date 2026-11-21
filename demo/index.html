@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>docsify-yacv — build123d &amp; CAD models in docsify</title>
+    <meta
+      name="description"
+      content="Yet Another CAD Viewer plugin for docsify with live in-browser build123d and static GLB/GLTF support."
+    />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2342b983'/%3E%3Cpath d='M32 13 51 23v18L32 51 13 41V23z' fill='none' stroke='white' stroke-width='4' stroke-linejoin='round'/%3E%3Cpath d='M13 23l19 10 19-10M32 33v18' fill='none' stroke='white' stroke-width='4'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@5/dist/themes/core.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@5/dist/themes/addons/vue.min.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/docsify@5/dist/themes/addons/core-dark.min.css"
+      media="(prefers-color-scheme: dark)"
+    />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <script src="../dist/docsify-yacv.min.js"></script>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const isLocalDemo = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(window.location.hostname);
+      // Locally, use the same-origin viewer proxy from `npm run demo` so models
+      // can be loaded without CORS/private-network restrictions.
+      const defaultViewer = isLocalDemo
+        ? '/yacv/'
+        : 'https://yeicor-3d.github.io/yet-another-cad-viewer/';
+
+      window.$docsify = {
+        name: 'docsify-yacv',
+        repo: 'gllmAR/docsify-yacv',
+        loadSidebar: true,
+        subMaxLevel: 2,
+        homepage: 'README.md',
+        // `?viewer=...` lets you try the demo with a local yacv build.
+        yacv: {
+          viewer: params.get('viewer') || defaultViewer,
+          version: 'stable',
+          height: '460px',
+          settings: {
+            // Every yacv frontend setting can be set globally...
+            edgeWidth: 1,
+          },
+        },
+        plugins: [
+          // ...or per embed, through fence attributes / <yacv> attributes.
+          DocsifyYacv(),
+        ],
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/docsify@5/dist/docsify.min.js"></script>
+    <!-- Optional: nicer Python highlighting for the source panels (the plugin uses
+         window.Prism.languages.python when available). -->
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-python.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-markdown.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docsify@5/dist/plugins/search.min.js"></script>
+  </body>
+</html>
