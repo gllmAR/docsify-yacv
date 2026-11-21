@@ -819,7 +819,9 @@ function load(ctx, slot = ctx.activeSlotId) {
 
       // The embedded viewer hides the Monaco editor (docsify shows the code).
       // "Open" should give access to the full playground, so unless the editor
-      // opacity was configured explicitly, show it in the new tab.
+      // opacity was configured explicitly, show it in the new tab. Preview-only
+      // embeds build their live Open URL lazily in the Open button handler, so
+      // the preview itself never waits for the code.
       const openParams = new URLSearchParams(params);
       if (hasCode) {
         const settings = ctx.options.settings || {};
@@ -1013,6 +1015,40 @@ function addRunButton(ctx) {
 }
 
 /**
+ * Builds the Open URL with the live code for preview-only embeds. This fetches
+ * external sources on demand, never during preview startup.
+ *
+ * @param {EmbedContext} ctx
+ * @returns {Promise<string | null>}
+ */
+async function buildLiveOpenUrl(ctx) {
+  const code = await ensureCode(ctx);
+  if (!code || !code.trim()) return null;
+  const params =
+    buildParams({
+      hasCode: true,
+      models: ctx.models,
+      attrs: ctx.attrs,
+      options: ctx.options,
+      base: ctx.base,
+    }) || new URLSearchParams();
+  params.set('pg_code', await encodeCode(code));
+  const settings = ctx.options.settings || {};
+  const editorConfigured =
+    ctx.attrs.editor !== undefined ||
+    ctx.attrs['pg-opacity-loading'] !== undefined ||
+    ctx.attrs.pg_opacity_loading !== undefined ||
+    ctx.options.editorExplicit === true ||
+    'pg_opacity_loading' in settings ||
+    'pg-opacity-loading' in settings ||
+    'pgopacityloading' in settings;
+  const openEditor = editorConfigured ? params.get('pg_opacity_loading') || '0' : '0.9';
+  params.set('pg_opacity_loading', openEditor);
+  params.set('pg_opacity_loaded', openEditor);
+  return buildViewerUrl(ctx.openViewer, params);
+}
+
+/**
  * @param {EmbedContext} ctx
  */
 function addOpenButton(ctx) {
@@ -1025,18 +1061,32 @@ function addOpenButton(ctx) {
   label.textContent = 'Open';
   btn.appendChild(label);
   btn.addEventListener('click', async () => {
-    const openUrl = ctx.openUrl || ctx.url;
-    if (openUrl) {
-      window.open(openUrl, '_blank', 'noopener,noreferrer');
-      return;
+    const previewOnly = ctx.live === false && ctx.hasCode;
+    if (!previewOnly) {
+      const openUrl = ctx.openUrl || ctx.url;
+      if (openUrl) {
+        window.open(openUrl, '_blank', 'noopener,noreferrer');
+        return;
+      }
     }
     // Open the tab synchronously so popup blockers do not reject it, then
     // navigate it once the viewer URL (with compressed code) is ready.
     const pending = window.open('', '_blank');
     btn.disabled = true;
     try {
-      await ensureLoaded(ctx);
-      const url = ctx.openUrl || ctx.url;
+      let url = ctx.openUrl || ctx.url;
+      if (previewOnly) {
+        try {
+          url = (await buildLiveOpenUrl(ctx)) || url;
+          ctx.openUrl = url;
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[docsify-yacv] Could not build the Open URL:', err);
+        }
+      } else {
+        await ensureLoaded(ctx);
+        url = ctx.openUrl || ctx.url;
+      }
       if (url && pending) {
         pending.opener = null;
         pending.location.href = url;

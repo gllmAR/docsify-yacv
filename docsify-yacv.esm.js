@@ -1284,6 +1284,24 @@ function addRunButton(ctx) {
   });
   ctx.actions.insertBefore(btn, ctx.actions.firstChild);
 }
+async function buildLiveOpenUrl(ctx) {
+  const code = await ensureCode(ctx);
+  if (!code || !code.trim()) return null;
+  const params = buildParams({
+    hasCode: true,
+    models: ctx.models,
+    attrs: ctx.attrs,
+    options: ctx.options,
+    base: ctx.base
+  }) || new URLSearchParams();
+  params.set("pg_code", await encodeCode(code));
+  const settings = ctx.options.settings || {};
+  const editorConfigured = ctx.attrs.editor !== void 0 || ctx.attrs["pg-opacity-loading"] !== void 0 || ctx.attrs.pg_opacity_loading !== void 0 || ctx.options.editorExplicit === true || "pg_opacity_loading" in settings || "pg-opacity-loading" in settings || "pgopacityloading" in settings;
+  const openEditor = editorConfigured ? params.get("pg_opacity_loading") || "0" : "0.9";
+  params.set("pg_opacity_loading", openEditor);
+  params.set("pg_opacity_loaded", openEditor);
+  return buildViewerUrl(ctx.openViewer, params);
+}
 function addOpenButton(ctx) {
   const btn = el("button", "yacv-btn");
   btn.type = "button";
@@ -1294,16 +1312,29 @@ function addOpenButton(ctx) {
   label.textContent = "Open";
   btn.appendChild(label);
   btn.addEventListener("click", async () => {
-    const openUrl = ctx.openUrl || ctx.url;
-    if (openUrl) {
-      window.open(openUrl, "_blank", "noopener,noreferrer");
-      return;
+    const previewOnly = ctx.live === false && ctx.hasCode;
+    if (!previewOnly) {
+      const openUrl = ctx.openUrl || ctx.url;
+      if (openUrl) {
+        window.open(openUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
     }
     const pending = window.open("", "_blank");
     btn.disabled = true;
     try {
-      await ensureLoaded(ctx);
-      const url = ctx.openUrl || ctx.url;
+      let url = ctx.openUrl || ctx.url;
+      if (previewOnly) {
+        try {
+          url = await buildLiveOpenUrl(ctx) || url;
+          ctx.openUrl = url;
+        } catch (err) {
+          console.warn("[docsify-yacv] Could not build the Open URL:", err);
+        }
+      } else {
+        await ensureLoaded(ctx);
+        url = ctx.openUrl || ctx.url;
+      }
       if (url && pending) {
         pending.opener = null;
         pending.location.href = url;

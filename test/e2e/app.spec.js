@@ -173,6 +173,13 @@ test.describe('docsify-yacv', () => {
   });
 
   test('preview-only embed loads the preview and starts live on demand', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__yacvOpened = [];
+      window.open = url => {
+        window.__yacvOpened.push(String(url));
+        return null;
+      };
+    });
     await page.goto('/#/preview');
     const embed = page.locator('.yacv-embed');
     await expect(embed).toHaveCount(1);
@@ -185,6 +192,17 @@ test.describe('docsify-yacv', () => {
       'http://127.0.0.1:8123/assets/preview.glb#name=part',
     ]);
     expect(staticParams.get('pg_code')).toBeNull();
+
+    // Open must include the live code even though the iframe is preview-only.
+    await embed.getByRole('button', { name: 'Open' }).click();
+    await expect
+      .poll(() => page.evaluate(() => window.__yacvOpened.find(url => url) || ''), { timeout: 5000 })
+      .not.toBe('');
+    const opened = await page.evaluate(() => window.__yacvOpened.find(url => url) || null);
+    expect(opened).toContain('open=1');
+    const openParams = viewerParams(opened);
+    expect(decodeCode(openParams)).toContain('show(Box(5, 5, 5))');
+    expect(openParams.get('pg_opacity_loading')).toBe('0.9');
 
     const run = embed.getByRole('button', { name: 'Run build123d' });
     await expect(run).toBeVisible();
