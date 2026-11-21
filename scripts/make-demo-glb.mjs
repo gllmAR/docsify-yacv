@@ -167,7 +167,7 @@ function cylinder(radius, height, segments) {
 
     positions.push(x0, -half, z0, x1, -half, z1, x1, half, z1, x0, half, z0);
     normals.push(...n0, ...n1, ...n1, ...n0);
-    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
 
     // Bottom cap
     const bottomCenter = positions.length / 3;
@@ -176,7 +176,7 @@ function cylinder(radius, height, segments) {
     const bottom0 = positions.length / 3;
     positions.push(x0, -half, z0, x1, -half, z1);
     normals.push(0, -1, 0, 0, -1, 0);
-    indices.push(bottomCenter, bottom0 + 1, bottom0);
+    indices.push(bottomCenter, bottom0, bottom0 + 1);
 
     // Top cap
     const topCenter = positions.length / 3;
@@ -185,7 +185,7 @@ function cylinder(radius, height, segments) {
     const top0 = positions.length / 3;
     positions.push(x0, half, z0, x1, half, z1);
     normals.push(0, 1, 0, 0, 1, 0);
-    indices.push(topCenter, top0, top0 + 1);
+    indices.push(topCenter, top0 + 1, top0);
   }
 
   return { positions, normals, indices };
