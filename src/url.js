@@ -166,6 +166,7 @@ export function buildParams({ hasCode, models = [], attrs = {}, options, base })
   const modelCandidates = [
     ...splitList(pickAttr(attrs, 'models')),
     ...splitList(pickAttr(attrs, 'src')),
+    ...splitList(pickAttr(attrs, 'preview')),
     ...splitList(pickAttr(attrs, 'preload')),
     ...models,
   ];

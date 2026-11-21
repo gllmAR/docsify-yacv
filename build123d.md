@@ -4,6 +4,10 @@ All examples on this page run in the browser through the yacv playground. The fi
 session downloads the OCP WebAssembly wheel (tens of megabytes), so subsequent examples are
 noticeably faster. See [performance notes](reference.md?id=performance-and-limits).
 
+> For pages where the 3D view matters more than interactive code, pair the fence with a
+> pre-exported `preview` GLB (see [Load code from a file](#load-code-from-a-file)) and optionally
+> `auto-load=false` so the sandbox starts only when the reader clicks **Run build123d**.
+
 ## A parametric part
 
 ```build123d height=420 title="Parametric flange"
@@ -159,10 +163,15 @@ Press <kbd>F10</kbd> inside the editor to run, or use the ▶ button.
 
 Keeping examples in real `.py` files lets you lint and test them, and keeps markdown short:
 
-```yacv code=show height=420
+```yacv code=show height=420 preview="assets/preview-bracket.glb#name=bracket"
 assets/bracket.py
 ```
 
 The file is fetched at runtime (same-origin by default, CORS otherwise), so it must be served by
 your docs host. Add `code=show` to render the fetched source above the viewer; `code-src` (or a
 `src` ending in `.py`) selects the file.
+
+The `preview` GLB in that block is the same bracket exported ahead of time with
+`yacv_server.export_all()`. yacv displays it after ~2–3s while the sandbox boots, then the live
+model (also named `bracket`) replaces it. This is the recommended pattern for any page where the
+3D view matters more than waiting for the Python kernel.

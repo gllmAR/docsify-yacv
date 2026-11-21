@@ -51,7 +51,11 @@ test.describe('docsify-yacv', () => {
     expect(params.get('pg_debug')).toBe('false');
     expect(params.get('pg_opacity_loading')).toBe('0');
     expect(params.get('pg_opacity_loaded')).toBe('0');
-    expect(params.get('preload')).toBeNull();
+    expect(params.getAll('preload')).toEqual(['http://127.0.0.1:8123/assets/preview.glb#name=part']);
+
+    // Resource hints are added for the viewer/Pyodide/PyPI origins.
+    await expect(page.locator('link[rel="preconnect"][href="https://cdn.jsdelivr.net"]')).toHaveCount(1);
+    await expect(page.locator('link[rel="preconnect"][href="https://pypi.org"]')).toHaveCount(1);
 
     await expect(embed.locator('.yacv-title')).toHaveText('Bracket demo');
     await expect(embed.locator('.yacv-badge')).toHaveText('build123d · 0.9.1');
@@ -166,6 +170,32 @@ test.describe('docsify-yacv', () => {
 
     await page.locator('.yacv-embed').scrollIntoViewIfNeeded();
     await expect(page.locator('.yacv-embed iframe')).toHaveCount(1);
+  });
+
+  test('preview-only embed loads the preview and starts live on demand', async ({ page }) => {
+    await page.goto('/#/preview');
+    const embed = page.locator('.yacv-embed');
+    await expect(embed).toHaveCount(1);
+    await embed.scrollIntoViewIfNeeded();
+
+    const iframe = embed.locator('iframe');
+    await expect(iframe).toHaveCount(1);
+    const staticParams = viewerParams(await iframe.getAttribute('src'));
+    expect(staticParams.getAll('preload')).toEqual([
+      'http://127.0.0.1:8123/assets/preview.glb#name=part',
+    ]);
+    expect(staticParams.get('pg_code')).toBeNull();
+
+    const run = embed.getByRole('button', { name: 'Run build123d' });
+    await expect(run).toBeVisible();
+    await run.click();
+
+    await expect
+      .poll(async () => {
+        const src = await embed.locator('iframe').getAttribute('src');
+        return src ? decodeCode(viewerParams(src)) : '';
+      })
+      .toContain('show(Box(5, 5, 5))');
   });
 
   test('supports click-to-load', async ({ page }) => {

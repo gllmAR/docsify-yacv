@@ -47,6 +47,42 @@ async function encodeCode(code) {
   return value;
 }
 
+// src/hints.js
+var added = /* @__PURE__ */ new Set();
+function add(origin, cors) {
+  if (!origin || typeof document === "undefined") return;
+  if (origin === window.location.origin) return;
+  const dnsKey = `dns:${origin}`;
+  if (!added.has(dnsKey)) {
+    added.add(dnsKey);
+    const dns = document.createElement("link");
+    dns.rel = "dns-prefetch";
+    dns.href = origin;
+    document.head.appendChild(dns);
+  }
+  const key = `${cors ? "cors" : "plain"}:${origin}`;
+  if (added.has(key)) return;
+  added.add(key);
+  const link = document.createElement("link");
+  link.rel = "preconnect";
+  link.href = origin;
+  if (cors) link.crossOrigin = "anonymous";
+  document.head.appendChild(link);
+}
+function ensureResourceHints(viewer, live) {
+  try {
+    const url = new URL(viewer, document.baseURI);
+    if (url.protocol === "http:" || url.protocol === "https:") add(url.origin, false);
+  } catch {
+  }
+  add("https://cdn.jsdelivr.net", true);
+  if (live) {
+    add("https://raw.githubusercontent.com", true);
+    add("https://pypi.org", true);
+    add("https://files.pythonhosted.org", true);
+  }
+}
+
 // src/highlight.js
 function highlightPython(codeEl, code) {
   const Prism = typeof window !== "undefined" ? window.Prism : void 0;
@@ -308,6 +344,8 @@ var DEFAULT_OPTIONS = {
   editor: 0,
   /** Defer iframe creation until the embed scrolls into view. */
   lazy: true,
+  /** How far before the viewport (CSS px) a lazy embed starts loading. */
+  lazyMargin: "200px",
   /** Load automatically. When false, a "Load 3D viewer" button is shown. */
   autoLoad: true,
   /** Show the small embed toolbar (title, code toggle, reload, open). */
@@ -332,6 +370,7 @@ function resolveOptions(userOptions = {}, vm = null) {
   merged.constraints = merged.constraints == null ? "" : String(merged.constraints);
   merged.editor = normalizeEditor(merged.editor, 0);
   merged.lazy = toBool(merged.lazy, true);
+  merged.lazyMargin = normalizeLazyMargin(merged.lazyMargin);
   merged.autoLoad = toBool(merged.autoLoad, true);
   merged.chrome = toBool(merged.chrome, true);
   merged.openInNewTab = toBool(merged.openInNewTab, true);
@@ -343,6 +382,13 @@ function resolveOptions(userOptions = {}, vm = null) {
     /** @type {ResolvedOptions} */
     merged
   );
+}
+function normalizeLazyMargin(value) {
+  if (value == null || value === "") return DEFAULT_OPTIONS.lazyMargin;
+  const s = typeof value === "number" ? `${value}px` : String(value).trim();
+  if (/^\d+(\.\d+)?$/.test(s)) return `${s}px`;
+  if (/^\d+(\.\d+)?(px|%)(\s+\d+(\.\d+)?(px|%)){0,3}$/.test(s)) return s;
+  return DEFAULT_OPTIONS.lazyMargin;
 }
 function normalizeEditor(value, fallback = 0) {
   if (value == null || value === "") return fallback;
@@ -446,6 +492,7 @@ function buildParams({ hasCode, models = [], attrs = {}, options, base }) {
   const modelCandidates = [
     ...splitList(pickAttr(attrs, "models")),
     ...splitList(pickAttr(attrs, "src")),
+    ...splitList(pickAttr(attrs, "preview")),
     ...splitList(pickAttr(attrs, "preload")),
     ...models
   ];
@@ -491,6 +538,7 @@ var fetchCache = /* @__PURE__ */ new Map();
 var ICONS = {
   code: "M14.6,16.6L19.2,12L14.6,7.4L16,6L22,12L16,18L14.6,16.6M9.4,16.6L4.8,12L9.4,7.4L8,6L2,12L8,18L9.4,16.6Z",
   open: "M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z",
+  play: "M8,5.14V19.14L19,12.14L8,5.14Z",
   reload: "M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"
 };
 function mountAll(vm, options) {
@@ -541,6 +589,7 @@ function prepareFence(pre, vm, options) {
       );
     }
   }
+  ensureResourceHints(options.viewer, false);
   const inlineCode = !!(code && code.trim());
   if (inlineCode) highlightPrePython(pre, code);
   const explicitShow = parseShowCode(attrs.code);
@@ -585,6 +634,7 @@ function prepareTag(tag, vm, options) {
     else models.push(src);
   }
   scripts.forEach((script) => script.remove());
+  ensureResourceHints(options.viewer, false);
   const hasInline = !!inlineCode;
   const explicitShow = parseShowCode(attrs.code);
   const ctx = createEmbed(
@@ -620,7 +670,7 @@ function createEmbed(spec, vm, options) {
   const title = stringAttr(pick(attrs, "title")) || options.title || "";
   const viewer = stringAttr(pick(attrs, "viewer")) || options.viewer;
   const version = stringAttr(pick(attrs, "version", "b3dversion", "pgversion", "pg_version")) || options.version;
-  const modelCount = spec.models.length + splitList(pick(attrs, "models")).length + splitList(pick(attrs, "src")).length + splitList(pick(attrs, "preload")).length;
+  const modelCount = spec.models.length + splitList(pick(attrs, "models")).length + splitList(pick(attrs, "src")).length + splitList(pick(attrs, "preview")).length + splitList(pick(attrs, "preload")).length;
   const autoLoad = pick(attrs, "autoload") === void 0 ? options.autoLoad : toBool(pick(attrs, "autoload"), options.autoLoad);
   const lazy = pick(attrs, "lazy") === void 0 ? options.lazy : toBool(pick(attrs, "lazy"), options.lazy);
   const chrome = pick(attrs, "chrome") === void 0 ? options.chrome : toBool(pick(attrs, "chrome"), options.chrome);
@@ -682,6 +732,8 @@ function createEmbed(spec, vm, options) {
     chrome,
     timer: null
   };
+  ctx.hasCode = hasCode;
+  ctx.live = true;
   stageContexts.set(stage, ctx);
   const openAttr = pick(attrs, "open");
   if (chrome && options.openInNewTab && (openAttr === void 0 || toBool(openAttr, true))) addOpenButton(ctx);
@@ -692,23 +744,36 @@ function createEmbed(spec, vm, options) {
   }
   return ctx;
 }
+function hasStaticModels(ctx) {
+  if (ctx.models && ctx.models.length > 0) return true;
+  return ["models", "src", "preview", "preload"].some((key) => splitList(ctx.attrs[key]).length > 0);
+}
 function finishSetup(ctx) {
   if (ctx.autoLoad === false) {
+    if (ctx.chrome && ctx.hasCode && hasStaticModels(ctx)) {
+      ctx.live = false;
+      addRunButton(ctx);
+      scheduleLoad(ctx, "The preview loads when it becomes visible.");
+      return;
+    }
     showPlaceholder(ctx, {
       text: "The 3D viewer is not loaded yet.",
       button: { label: "Load 3D viewer", onClick: () => load(ctx) }
     });
     return;
   }
+  scheduleLoad(ctx, "The 3D viewer loads when it becomes visible.");
+}
+function scheduleLoad(ctx, text) {
   if (!ctx.lazy || typeof IntersectionObserver === "undefined") {
     load(ctx);
     return;
   }
-  showPlaceholder(ctx, { text: "The 3D viewer loads when it becomes visible." });
-  ensureObserver().observe(ctx.stage);
+  showPlaceholder(ctx, { text });
+  ensureObserver(ctx.options).observe(ctx.stage);
   observedStages.add(ctx.stage);
 }
-function ensureObserver() {
+function ensureObserver(options) {
   if (observer) return observer;
   observer = new IntersectionObserver(
     (entries) => {
@@ -720,7 +785,7 @@ function ensureObserver() {
         if (ctx) load(ctx);
       }
     },
-    { rootMargin: "400px 0px" }
+    { rootMargin: options.lazyMargin || "200px 0px" }
   );
   return observer;
 }
@@ -766,24 +831,27 @@ function load(ctx) {
   if (ctx.loading) return ctx.loading;
   setState(ctx, "loading");
   showPlaceholder(ctx, { spinner: true, text: "Loading 3D viewer\u2026" });
-  ctx.loading = (async () => {
+  const loading = (async () => {
     try {
       if (ctx.iframe) {
         ctx.iframe.remove();
         ctx.iframe = null;
       }
       let code = null;
-      try {
-        code = await ensureCode(ctx);
-      } catch (err) {
-        if (ctx.models.length === 0) throw err;
-        console.warn("[docsify-yacv]", err);
+      if (ctx.live !== false) {
+        try {
+          code = await ensureCode(ctx);
+        } catch (err) {
+          if (!hasStaticModels(ctx)) throw err;
+          console.warn("[docsify-yacv]", err);
+        }
       }
       if (code && ctx.showCode && !ctx.codeWrap) {
         createCodePanel(ctx, code);
         mountCodeToggle(ctx);
       }
       const hasCode = !!(code && code.trim());
+      if (hasCode) ensureResourceHints(ctx.viewer, true);
       const params = buildParams({
         hasCode,
         models: ctx.models,
@@ -844,12 +912,14 @@ function load(ctx) {
       setState(ctx, "error");
       showPlaceholder(ctx, { text: describeError(err), error: true });
       console.warn("[docsify-yacv]", err);
-    } finally {
-      ctx.loading = null;
     }
     return ctx;
   })();
-  return ctx.loading;
+  ctx.loading = loading;
+  loading.finally(() => {
+    if (ctx.loading === loading) ctx.loading = null;
+  });
+  return loading;
 }
 function mountCodeToggle(ctx) {
   if (!ctx.chrome || !ctx.actions || ctx.codeBtn) return;
@@ -914,6 +984,23 @@ function createCodePanel(ctx, code) {
   ctx.container.before(wrap);
   ctx.codeWrap = wrap;
   applyCodeVisibility(ctx);
+}
+function addRunButton(ctx) {
+  if (!ctx.chrome || !ctx.actions) return;
+  const btn = el("button", "yacv-btn");
+  btn.type = "button";
+  btn.title = "Run this build123d code in the browser";
+  btn.setAttribute("aria-label", "Run build123d");
+  btn.appendChild(icon(ICONS.play));
+  const label = el("span");
+  label.textContent = "Run build123d";
+  btn.appendChild(label);
+  btn.addEventListener("click", () => {
+    btn.remove();
+    ctx.live = true;
+    reload(ctx);
+  });
+  ctx.actions.insertBefore(btn, ctx.actions.firstChild);
 }
 function addOpenButton(ctx) {
   const btn = el("button", "yacv-btn");

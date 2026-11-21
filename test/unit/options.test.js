@@ -17,6 +17,7 @@ test('resolveOptions: defaults', () => {
   assert.equal(options.editor, 0);
   assert.equal(options.editorExplicit, false);
   assert.equal(options.lazy, true);
+  assert.equal(options.lazyMargin, '200px');
   assert.equal(options.autoLoad, true);
   assert.equal(options.chrome, true);
   assert.deepEqual(options.settings, {});
@@ -32,6 +33,15 @@ test('resolveOptions: $docsify.yacv is used, factory options win', () => {
   assert.equal(options.height, 320);
   assert.equal(options.version, 'dev');
   assert.deepEqual(options.settings, { edgeWidth: 2, autoplay: false, exposure: 1.4 });
+});
+
+test('resolveOptions: lazyMargin accepts numbers and CSS lengths', () => {
+  assert.equal(resolveOptions({ lazyMargin: 300 }).lazyMargin, '300px');
+  assert.equal(resolveOptions({ lazyMargin: '300' }).lazyMargin, '300px');
+  assert.equal(resolveOptions({ lazyMargin: '10%' }).lazyMargin, '10%');
+  assert.equal(resolveOptions({ lazyMargin: '300px 0px' }).lazyMargin, '300px 0px');
+  assert.equal(resolveOptions({ lazyMargin: '30vh' }).lazyMargin, '200px');
+  assert.equal(resolveOptions({ lazyMargin: '' }).lazyMargin, '200px');
 });
 
 test('resolveOptions: marks editor as explicit only when configured', () => {

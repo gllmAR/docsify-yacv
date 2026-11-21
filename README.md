@@ -5,7 +5,7 @@ viewers, powered by [Yet Another CAD Viewer](https://github.com/yeicor-3d/yet-an
 Build123d runs entirely in the reader's browser (OCP compiled to WebAssembly), so there is no
 server, no Python install and no build step.
 
-```build123d height=440 title="Live build123d — click Open to edit"
+```build123d height=440 title="build123d — click Run to edit" preview="assets/preview-part.glb#name=part" auto-load=false
 from build123d import *
 
 with BuildPart() as part:
@@ -35,6 +35,9 @@ Python code block. The same Markdown works everywhere.
   button; the 3D view sits right below it.
 - **Configurable sandbox** — pin build123d versions (PyPI, branch, tag, PR), debug wheels, pip
   constraints, Monaco editor, extra packages via micropip.
+- **Fast perceived startup** — pair live code with a `preview` GLB: the model appears in ~2–3s
+  while the in-browser sandbox boots (or waits for a **Run build123d** click), then the live result
+  replaces it.
 - **No build, static hosting** — the plugin is a single root-level `docsify-yacv.js`, committed and
   served as-is. The repository root is the docsify demo.
 
@@ -130,8 +133,9 @@ Supported languages: `build123d`, `b3d`, `b123d`, `yacv-build123d`, `yacv-py`, `
 `python yacv` if you want to keep Python highlighting.
 
 Per-embed options are space separated: `height`, `title`, `version`/`b3d-version`, `debug`,
-`constraints`, `editor`, `code` (`show`/`hide`), `code-src`, `models`/`src`, `lazy`, `auto-load`,
-`chrome`, `open`, `viewer`, plus every yacv viewer setting (`edgeWidth=2`, `autoplay=false`, ...).
+`constraints`, `editor`, `code` (`show`/`hide`), `code-src`, `preview`, `models`/`src`, `lazy`,
+`auto-load`, `chrome`, `open`, `viewer`, plus every yacv viewer setting (`edgeWidth=2`,
+`autoplay=false`, ...).
 Values with spaces must be quoted: `title="My part"`.
 
 ### Static models
@@ -214,6 +218,7 @@ window.$docsify = {
 | `constraints` | `''` | Pip constraints (`;`/newline separated or JSON mapping). |
 | `editor` | `0` | In-iframe Monaco opacity (`0` hides it; docsify shows the code). |
 | `lazy` | `true` | Create iframes when they approach the viewport. |
+| `lazyMargin` | `200px` | How far before the viewport lazy embeds start loading. |
 | `autoLoad` | `true` | `false` shows a **Load 3D viewer** button. |
 | `chrome` | `true` | Show the embed toolbar. |
 | `openInNewTab` | `true` | Show the **Open** action (full viewer with editor). |
@@ -237,6 +242,33 @@ performance notes, styling variables, security notes and troubleshooting.
 | Editable sandbox inside the docs | `editor=0.9` (Monaco, F10 to run) |
 | Additional pure-Python packages | `await micropip.install("bd_warehouse")` inside the snippet |
 | Static export for fast pages | `yacv_server.export_all()` + a `yacv` fence |
+
+## Time to interactive
+
+Measured on the live demo with a warm browser cache (Chromium, 1 Gbps, M1-class machine):
+
+| Embed | Time until the model is visible |
+| ----- | ------------------------------- |
+| Static `yacv` model (GLB) | ~2–3s |
+| Live build123d **with `preview`** | preview in ~2–3s; live geometry replaces it ~20s after the sandbox starts |
+| Live build123d **with `preview` + `auto-load=false`** | preview in ~2–3s; sandbox starts only on **Run build123d** |
+| Live build123d without preview | ~20–30s (Pyodide + build123d/OCP.wasm install and imports) |
+
+The live sandbox cost is dominated by Pyodide boot plus installing/importing build123d, OCP and the
+scientific Python stack — not by this plugin. Practical mitigations:
+
+- **Add a `preview` GLB.** Export the same model with `yacv_server.export_all()` and use the live
+  model's variable name: `preview="assets/part.glb#name=part"`. yacv renders it immediately and
+  replaces it when the sandbox output arrives.
+- **Combine it with `auto-load=false`.** The preview still loads, and readers get a
+  **Run build123d** button that starts the sandbox. This keeps pages fast and avoids ~20s of CPU
+  for readers who only want to look at the model.
+- **Prefer static GLBs** for anything that does not need to be executable.
+- **Keep one or two live embeds per page.** Each live embed boots its own Pyodide instance.
+- **Use `auto-load=false`** for optional live examples; readers opt in with a click.
+- **Tune `lazyMargin`** (default `200px`): smaller values avoid starting off-screen sandboxes early.
+- The plugin adds `preconnect`/`dns-prefetch` hints for the viewer, Pyodide CDN and (on live pages)
+  PyPI/OCP.wasm origins.
 
 ## Static hosting
 

@@ -36,6 +36,8 @@ export interface DocsifyYacvOptions {
   editor?: number | string | boolean;
   /** Defer iframe creation until the embed scrolls into view. Default: true. */
   lazy?: boolean;
+  /** How far before the viewport lazy embeds start loading. Default: "200px". */
+  lazyMargin?: string | number;
   /** Load automatically. When false, a "Load 3D viewer" button is shown. */
   autoLoad?: boolean;
   /** Show the embed toolbar. Default: true. */

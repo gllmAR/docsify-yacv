@@ -94,6 +94,8 @@ export const DEFAULT_OPTIONS = {
   editor: 0,
   /** Defer iframe creation until the embed scrolls into view. */
   lazy: true,
+  /** How far before the viewport (CSS px) a lazy embed starts loading. */
+  lazyMargin: '200px',
   /** Load automatically. When false, a "Load 3D viewer" button is shown. */
   autoLoad: true,
   /** Show the small embed toolbar (title, code toggle, reload, open). */
@@ -128,6 +130,7 @@ export function resolveOptions(userOptions = {}, vm = null) {
   merged.constraints = merged.constraints == null ? '' : String(merged.constraints);
   merged.editor = normalizeEditor(merged.editor, 0);
   merged.lazy = toBool(merged.lazy, true);
+  merged.lazyMargin = normalizeLazyMargin(merged.lazyMargin);
   merged.autoLoad = toBool(merged.autoLoad, true);
   merged.chrome = toBool(merged.chrome, true);
   merged.openInNewTab = toBool(merged.openInNewTab, true);
@@ -141,6 +144,20 @@ export function resolveOptions(userOptions = {}, vm = null) {
     Object.prototype.hasOwnProperty.call(fromConfig, 'editor') || Object.prototype.hasOwnProperty.call(own, 'editor');
 
   return /** @type {ResolvedOptions} */ (merged);
+}
+
+/**
+ * Normalizes a lazy-loading margin for IntersectionObserver (px or %).
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function normalizeLazyMargin(value) {
+  if (value == null || value === '') return DEFAULT_OPTIONS.lazyMargin;
+  const s = typeof value === 'number' ? `${value}px` : String(value).trim();
+  if (/^\d+(\.\d+)?$/.test(s)) return `${s}px`;
+  if (/^\d+(\.\d+)?(px|%)(\s+\d+(\.\d+)?(px|%)){0,3}$/.test(s)) return s;
+  return DEFAULT_OPTIONS.lazyMargin;
 }
 
 /**
@@ -173,6 +190,7 @@ export function normalizeEditor(value, fallback = 0) {
  * @property {string} [constraints] Global pip constraints (newline separated).
  * @property {number | string | boolean} [editor] In-iframe playground editor opacity (0 = hidden).
  * @property {boolean} [lazy] Only create the iframe when scrolled into view.
+ * @property {string | number} [lazyMargin] Viewport margin for lazy loading (px or %).
  * @property {boolean} [autoLoad] Load automatically (false = click to load).
  * @property {boolean} [chrome] Show the embed toolbar.
  * @property {boolean} [openInNewTab] Show the "Open" action.

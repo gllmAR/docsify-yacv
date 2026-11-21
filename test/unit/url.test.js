@@ -84,7 +84,7 @@ test('buildParams: static models are resolved and deduplicated', () => {
 test('buildParams: models can also come from attributes', () => {
   const params = buildParams({
     hasCode: false,
-    attrs: { models: 'a.glb, b.glb', src: 'c.glb', preload: 'd.glb' },
+    attrs: { models: 'a.glb, b.glb', src: 'c.glb', preview: 'p.glb#name=part', preload: 'd.glb' },
     options,
     base,
   });
@@ -92,6 +92,7 @@ test('buildParams: models can also come from attributes', () => {
     'https://docs.example.com/guide/a.glb',
     'https://docs.example.com/guide/b.glb',
     'https://docs.example.com/guide/c.glb',
+    'https://docs.example.com/guide/p.glb#name=part',
     'https://docs.example.com/guide/d.glb',
   ]);
 });

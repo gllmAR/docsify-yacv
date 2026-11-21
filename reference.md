@@ -37,7 +37,8 @@ window.$docsify = {
 | `constraints`  | `string`            | `''`                                             | Pip constraints for the sandbox, newline or `;` separated, or a JSON mapping. |
 | `editor`       | `number \| string`  | `0`                                              | Opacity of the in-iframe Monaco editor. `0` hides it (code is shown by docsify instead); `show` = `0.9`. |
 | `lazy`         | `boolean`           | `true`                                           | Create the iframe only when the embed approaches the viewport. |
-| `autoLoad`     | `boolean`           | `true`                                           | When `false`, show a **Load 3D viewer** button instead of loading automatically. |
+| `lazyMargin`   | `string \| number`  | `200px`                                          | How far before the viewport a lazy embed starts loading. |
+| `autoLoad`     | `boolean`           | `true`                                           | When `false`, show a **Load 3D viewer** button. With a `preview`/static model it instead loads the preview and shows a **Run build123d** button for the sandbox. |
 | `chrome`       | `boolean`           | `true`                                           | Show the toolbar (title, badge, code toggle, reload, open). |
 | `openInNewTab` | `boolean`           | `true`                                           | Show the **Open** action that opens the model in the full viewer. |
 | `settings`     | `object`            | `{}`                                             | Extra yacv frontend settings applied to every embed. |
@@ -66,6 +67,7 @@ show(Box(10, 10, 10))
 | `code`            | `show-code`                | Show/hide the source panel (`show`, `hide`, `true`, `false`). |
 | `code-src`        |                            | External `.py` file to execute (instead of inline code). |
 | `models`          | `src`, `preload`          | Static model URL(s) to load, comma separated. |
+| `preview`         |                           | Static GLB shown while live code boots (use `#name=<variable>` to let yacv replace it). |
 | `lazy`            |                            | Override the global lazy setting. |
 | `auto-load`       | `autoload`                 | Override the global auto-load setting. |
 | `chrome`          |                            | Override the global toolbar setting. |
@@ -146,6 +148,8 @@ These are forwarded to the viewer. See the
 6. `Open` opens the viewer URL (including compressed code) in a new tab. For live code it uses an
    editor opacity of `0.9` (unless you configured `editor`), so readers can edit and re-run the
    example there. `Reload` resets the embedded iframe.
+7. `preview`, `src`, `models` and `preload` are all passed as yacv `preload` parameters. The viewer
+   renders them while the sandbox boots; a live model with the same `#name=` replaces its preview.
 
 ## Embed chrome and the yacv sidebars
 
@@ -159,14 +163,39 @@ may remain visible at the top of the iframe, from which readers can bring the ed
 `editor=0.9` to show the editor directly, or rely on the docsify code panel plus the **Open**
 action.
 
+## Time to interactive
+
+Measured on the live demo with a warm cache (Chromium, M1-class machine):
+
+| Embed | Model visible |
+| ----- | ------------- |
+| Static GLB (`yacv` fence) | ~2–3s |
+| Live build123d + `preview` GLB | ~2–3s, replaced by live geometry ~20s after the sandbox starts |
+| Live build123d + `preview` + `auto-load=false` | ~2–3s; sandbox starts on **Run build123d** |
+| Live build123d without preview | ~20–30s |
+
+The live cost is Pyodide boot plus installing/importing build123d, OCP.wasm and the scientific
+Python stack. It is not caused by this plugin and cannot be removed from the docs side.
+
+Practical improvements:
+
+- Add `preview="assets/part.glb#name=part"` (name = the variable passed to `show()`). yacv renders
+  the static model immediately and replaces it when the live output arrives.
+- Prefer static GLBs for heavy or non-executable models.
+- Keep one or two live embeds per page: each iframe boots its own Pyodide instance, although wheels
+  are reused from the browser cache.
+- Use `auto-load=false` for optional live examples. With a preview model, the preview is still
+  shown and a **Run build123d** button starts the sandbox on demand.
+- Lower `lazyMargin` if a page has many embeds; off-screen sandboxes then start later.
+- The plugin adds `preconnect`/`dns-prefetch` hints for the viewer origin, jsDelivr and (for live
+  embeds) the PyPI/OCP.wasm origins.
+
 ## Performance and limits
 
 - The **first** live embed in a browser session downloads Pyodide and the OCP WASM wheels
   (tens of MB). Later embeds on the same page/origin reuse the browser HTTP cache, but each iframe
-  runs its own Pyodide instance. Prefer **one or two live embeds per page** and static GLB files
-  for the rest.
-- Keep `lazy` enabled on long pages. If a page has several heavy live embeds, use
-  `auto-load=false` so readers opt in.
+  runs its own Pyodide instance.
+- Keep `lazy` enabled on long pages.
 - The sandbox editor is heavy (Monaco). The default `editor=0` avoids loading it visibly, and the
   docsify code block already gives readers the source.
 - WebAssembly, `CompressionStream` and `IntersectionObserver` are required for the full experience;

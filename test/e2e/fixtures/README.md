@@ -2,7 +2,7 @@
 
 ## Live build123d
 
-```build123d height=321 title='Bracket demo'
+```build123d height=321 title='Bracket demo' preview="assets/preview.glb#name=part"
 from build123d import *
 
 with BuildPart() as part:
