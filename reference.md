@@ -2,20 +2,28 @@
 
 ## Plugin options
 
-Pass options to the factory and/or set them globally in `window.$docsify.yacv`. Factory options
-win over `$docsify.yacv`, which wins over the defaults.
+With the auto-registering `docsify-yacv.js`, configure the plugin under `window.$docsify.yacv`:
 
 ```js
 window.$docsify = {
   yacv: {
     version: 'stable',
+    height: '460px',
     settings: { edgeWidth: 1, autoplay: true },
   },
-  plugins: [
-    DocsifyYacv({
-      height: '460px',
-    }),
-  ],
+};
+```
+
+When importing the ESM build (bundlers, npm), pass options to the factory instead. Factory options
+win over `$docsify.yacv`, which wins over the defaults; the ESM entry does not auto-register, so add
+it to `plugins`:
+
+```js
+import DocsifyYacv from 'docsify-yacv';
+
+window.$docsify = {
+  yacv: { version: 'stable' },
+  plugins: [DocsifyYacv({ height: '460px' })],
 };
 ```
 

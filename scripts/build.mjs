@@ -1,4 +1,13 @@
 #!/usr/bin/env node
+/**
+ * Builds the two committed, directly-hostable artifacts:
+ *
+ *   docsify-yacv.js      IIFE, auto-registers with docsify (script tag / CDN)
+ *   docsify-yacv.esm.js  ESM, default export for bundlers / npm imports
+ *
+ * No source maps, no dist/ directory: the repository root is the static site
+ * and the plugin file.
+ */
 import { build, context } from 'esbuild';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -13,10 +22,8 @@ const banner = {
 
 /** @type {import('esbuild').BuildOptions[]} */
 const targets = [
-  { entryPoints: ['src/iife.js'], outfile: 'dist/docsify-yacv.js', format: 'iife' },
-  { entryPoints: ['src/iife.js'], outfile: 'dist/docsify-yacv.min.js', format: 'iife', minify: true },
-  { entryPoints: ['src/index.js'], outfile: 'dist/docsify-yacv.esm.js', format: 'esm' },
-  { entryPoints: ['src/index.js'], outfile: 'dist/docsify-yacv.esm.min.js', format: 'esm', minify: true },
+  { entryPoints: ['src/iife.js'], outfile: 'docsify-yacv.js', format: 'iife' },
+  { entryPoints: ['src/index.js'], outfile: 'docsify-yacv.esm.js', format: 'esm' },
 ];
 
 const common = {
@@ -24,7 +31,7 @@ const common = {
   target: ['es2020'],
   platform: 'browser',
   banner,
-  sourcemap: true,
+  sourcemap: false,
   legalComments: 'none',
   logLevel: 'info',
   absWorkingDir: root,

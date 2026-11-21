@@ -20,43 +20,38 @@
   <body>
     <div id="app"></div>
 
-    <script src="../dist/docsify-yacv.min.js"></script>
+    <!-- Plugin configuration (all optional) -->
     <script>
       const params = new URLSearchParams(window.location.search);
-      const isLocalDemo = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(window.location.hostname);
-      // Locally, use the same-origin viewer proxy from `npm run demo` so models
-      // can be loaded without CORS/private-network restrictions.
-      const defaultViewer = isLocalDemo
-        ? '/yacv/'
-        : 'https://yeicor-3d.github.io/yet-another-cad-viewer/';
 
       window.$docsify = {
         name: 'docsify-yacv',
         repo: 'gllmAR/docsify-yacv',
         loadSidebar: true,
         subMaxLevel: 2,
-        homepage: 'README.md',
-        // `?viewer=...` lets you try the demo with a local yacv build.
+        auto2top: true,
         yacv: {
-          viewer: params.get('viewer') || defaultViewer,
+          // `npm run demo` sets ?viewer=/yacv/ to use its local proxy, which
+          // makes the demo models same-origin (browsers block public origins
+          // from fetching loopback URLs). Plain static hosting uses the public
+          // viewer below.
+          viewer: params.get('viewer') || 'https://yeicor-3d.github.io/yet-another-cad-viewer/',
           version: 'stable',
           height: '460px',
           settings: {
-            // Every yacv frontend setting can be set globally...
             edgeWidth: 1,
           },
         },
-        plugins: [
-          // ...or per embed, through fence attributes / <yacv> attributes.
-          DocsifyYacv(),
-        ],
       };
     </script>
+
     <script src="https://cdn.jsdelivr.net/npm/docsify@5/dist/docsify.min.js"></script>
-    <!-- Optional: nicer Python highlighting for the source panels (the plugin uses
-         window.Prism.languages.python when available). -->
+    <!-- Optional: nicer Python highlighting for the source panels (the plugin
+         uses window.Prism.languages.python when available). -->
     <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-python.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-markdown.min.js"></script>
+    <!-- The plugin auto-registers itself with docsify. -->
+    <script src="./docsify-yacv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/docsify@5/dist/plugins/search.min.js"></script>
   </body>
 </html>

@@ -1346,7 +1346,8 @@
   // src/iife.js
   if (typeof window !== "undefined") {
     window.DocsifyYacv = docsifyYacv;
+    window.$docsify = window.$docsify || {};
+    window.$docsify.plugins = (window.$docsify.plugins || []).concat(docsifyYacv());
   }
   var iife_default = docsifyYacv;
 })();
-//# sourceMappingURL=docsify-yacv.js.map

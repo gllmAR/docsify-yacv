@@ -7,8 +7,10 @@ import { injectStyles } from './styles.js';
  * Docsify plugin factory.
  *
  * @example
+ * import DocsifyYacv from 'docsify-yacv';
  * window.$docsify = {
- *   plugins: [DocsifyYacv({ version: 'stable' })],
+ *   yacv: { version: 'stable' },
+ *   plugins: [DocsifyYacv()],
  * };
  *
  * @param {import('./options.js').DocsifyYacvOptions} [userOptions]

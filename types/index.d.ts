@@ -65,7 +65,7 @@ export default yacv;
 
 declare global {
   interface Window {
-    /** Global exposed by `dist/docsify-yacv.js` / `dist/docsify-yacv.min.js`. */
+    /** Global exposed by the auto-registering `docsify-yacv.js` script tag. */
     DocsifyYacv?: typeof yacv;
   }
 }

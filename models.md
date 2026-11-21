@@ -115,7 +115,6 @@ window.$docsify = {
   yacv: {
     viewer: 'assets/yacv/', // or a full URL
   },
-  plugins: [DocsifyYacv()],
 };
 ```
 

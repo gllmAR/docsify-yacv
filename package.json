@@ -5,22 +5,23 @@
   "license": "MIT",
   "author": "Gllmar",
   "type": "module",
-  "main": "dist/docsify-yacv.js",
-  "module": "dist/docsify-yacv.esm.js",
+  "main": "docsify-yacv.js",
+  "module": "docsify-yacv.esm.js",
   "types": "types/index.d.ts",
-  "unpkg": "dist/docsify-yacv.min.js",
-  "jsdelivr": "dist/docsify-yacv.min.js",
+  "unpkg": "docsify-yacv.js",
+  "jsdelivr": "docsify-yacv.js",
   "exports": {
     ".": {
       "types": "./types/index.d.ts",
-      "import": "./dist/docsify-yacv.esm.js",
-      "default": "./dist/docsify-yacv.esm.js"
+      "import": "./docsify-yacv.esm.js",
+      "default": "./docsify-yacv.esm.js"
     },
-    "./dist/*": "./dist/*",
+    "./docsify-yacv.js": "./docsify-yacv.js",
     "./package.json": "./package.json"
   },
   "files": [
-    "dist",
+    "docsify-yacv.js",
+    "docsify-yacv.esm.js",
     "types",
     "README.md",
     "LICENSE"

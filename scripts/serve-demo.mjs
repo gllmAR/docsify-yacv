@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Serves the repository root (so /demo and /dist work) with permissive CORS
- * headers, which the yacv viewer needs to load demo models from a different
- * origin.
+ * Serves the repository root (the docsify demo) with permissive CORS headers,
+ * which the yacv viewer needs to load demo models from a different origin.
+ * Also proxies yacv under /yacv/ so local models are same-origin.
  */
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
@@ -34,11 +34,16 @@ const MIME = {
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://localhost');
-  if (url.pathname === '/') {
-    res.writeHead(302, { location: '/demo/' });
+
+  // Use the local /yacv/ proxy by default when serving the root page, so the
+  // demo's static models are same-origin. Any static host can serve the same
+  // files without this redirect (and without a build).
+  if (url.pathname === '/' && !url.searchParams.has('viewer')) {
+    res.writeHead(302, { location: `/?viewer=${encodeURIComponent('/yacv/')}${url.hash}` });
     res.end();
     return;
   }
+
   if (url.pathname === '/favicon.ico') {
     res.writeHead(204);
     res.end();
@@ -123,5 +128,5 @@ const server = createServer(async (req, res) => {
 
 server.listen(port, () => {
   // eslint-disable-next-line no-console
-  console.log(`docsify-yacv demo: http://localhost:${port}/demo/`);
+  console.log(`docsify-yacv demo: http://localhost:${port}/?viewer=${encodeURIComponent('/yacv/')}`);
 });

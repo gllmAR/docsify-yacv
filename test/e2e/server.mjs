@@ -30,7 +30,7 @@ function resolvePath(urlPath) {
   if (urlPath === '/docsify.min.js') return path.join(root, 'node_modules/docsify/dist/docsify.min.js');
   if (urlPath === '/docsify4.min.js') return path.join(root, 'node_modules/docsify4/lib/docsify.min.js');
   if (urlPath === '/docsify-core.css') return path.join(root, 'node_modules/docsify/dist/themes/core.min.css');
-  if (urlPath === '/docsify-yacv.js') return path.join(root, 'dist/docsify-yacv.js');
+  if (urlPath === '/docsify-yacv.js') return path.join(root, 'docsify-yacv.js');
   if (urlPath === '/') return path.join(fixtures, 'index.html');
 
   const clean = decodeURIComponent(urlPath.split('?')[0]);

@@ -8,20 +8,18 @@
   </head>
   <body>
     <div id="app"></div>
-    <script src="/docsify-yacv.js"></script>
     <script>
       window.$docsify = {
         name: 'docsify-yacv e2e',
         basePath: '/',
-        plugins: [
-          window.DocsifyYacv({
-            viewer: '/viewer-stub.html',
-            version: '0.9.1',
-            lazy: true,
-          }),
-        ],
+        yacv: {
+          viewer: '/viewer-stub.html',
+          version: '0.9.1',
+          lazy: true,
+        },
       };
     </script>
     <script src="/docsify.min.js"></script>
+    <script src="/docsify-yacv.js"></script>
   </body>
 </html>

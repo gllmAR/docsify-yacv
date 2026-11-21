@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const outDir = path.join(root, 'demo/assets');
+const outDir = path.join(root, 'assets');
 mkdirSync(outDir, { recursive: true });
 
 const GLB_MAGIC = 0x46546c67;
@@ -204,4 +204,4 @@ writeFileSync(
 );
 
 // eslint-disable-next-line no-console
-console.log('Wrote demo/assets/cube.glb and demo/assets/cylinder.glb');
+console.log('Wrote assets/cube.glb and assets/cylinder.glb');

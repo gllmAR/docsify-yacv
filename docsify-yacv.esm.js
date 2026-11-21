@@ -1347,4 +1347,3 @@ export {
   docsifyYacv as default,
   docsifyYacv as yacv
 };
-//# sourceMappingURL=docsify-yacv.esm.js.map
