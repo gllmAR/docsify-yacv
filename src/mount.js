@@ -396,12 +396,37 @@ function hasStaticModels(ctx) {
 }
 
 /**
+ * Adds the poster image under the viewer. It is visible until the iframe loads.
+ *
+ * @param {EmbedContext} ctx
+ */
+function createPoster(ctx) {
+  if (!ctx.poster || ctx.posterEl) return;
+  const poster = el('img', 'yacv-poster');
+  poster.src = resolveUrl(ctx.poster, ctx.base);
+  poster.alt = ctx.title ? `${ctx.title} preview` : '3D model preview';
+  poster.loading = 'eager';
+  poster.addEventListener(
+    'error',
+    () => {
+      poster.remove();
+      ctx.posterEl = null;
+      if (ctx.autoLoad === false) scheduleLoad(ctx, 'The preview loads when it becomes visible.');
+    },
+    { once: true },
+  );
+  ctx.posterEl = poster;
+  ctx.stage.appendChild(poster);
+}
+
+/**
  * Starts lazy loading / immediate loading for a fresh embed.
  *
  * @param {EmbedContext} ctx
  */
 function finishSetup(ctx) {
   observeUnload(ctx);
+  createPoster(ctx);
 
   if (ctx.autoLoad === false) {
     // With a static preview we can show the model immediately and only boot
@@ -411,27 +436,13 @@ function finishSetup(ctx) {
       addRunButton(ctx);
 
       if (ctx.poster) {
-        // Show a pre-rendered poster instantly; load the interactive viewer
-        // only on intent (hover/tap/focus) or when Run is pressed.
-        const poster = el('img', 'yacv-poster');
-        poster.src = resolveUrl(ctx.poster, ctx.base);
-        poster.alt = ctx.title ? `${ctx.title} preview` : '3D model preview';
-        poster.loading = 'eager';
-        poster.addEventListener(
-          'error',
-          () => {
-            poster.remove();
-            ctx.posterEl = null;
-            scheduleLoad(ctx, 'The preview loads when it becomes visible.');
-          },
-          { once: true },
-        );
-        ctx.posterEl = poster;
-        ctx.stage.appendChild(poster);
+        // The poster is already visible; load the interactive viewer only on
+        // intent (hover/tap/focus/click) or when Run is pressed.
         const load = () => enqueueLoad(ctx, true);
         ctx.container.addEventListener('pointerenter', load, { once: true });
         ctx.container.addEventListener('pointerdown', load, { once: true });
         ctx.container.addEventListener('focusin', load, { once: true });
+        ctx.container.addEventListener('click', load, { once: true });
       } else {
         scheduleLoad(ctx, 'The preview loads when it becomes visible.');
       }
@@ -477,7 +488,7 @@ function scheduleLoad(ctx, text) {
     enqueueLoad(ctx);
     return;
   }
-  showPlaceholder(ctx, { text });
+  if (!ctx.posterEl) showPlaceholder(ctx, { text });
   ensureObserver(ctx.options).observe(ctx.stage);
   observedStages.add(ctx.stage);
 }
@@ -864,7 +875,8 @@ function load(ctx, slot = ctx.activeSlotId) {
   }
 
   setState(ctx, 'loading');
-  showPlaceholder(ctx, { spinner: true, text: 'Loading 3D viewer…' });
+  if (ctx.posterEl) ctx.posterEl.hidden = false;
+  else showPlaceholder(ctx, { spinner: true, text: 'Loading 3D viewer…' });
 
   const loading = (async () => {
     try {

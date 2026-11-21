@@ -991,32 +991,37 @@ function hasStaticModels(ctx) {
   if (ctx.models && ctx.models.length > 0) return true;
   return ["models", "src", "preview", "preload"].some((key) => splitList(ctx.attrs[key]).length > 0);
 }
+function createPoster(ctx) {
+  if (!ctx.poster || ctx.posterEl) return;
+  const poster = el("img", "yacv-poster");
+  poster.src = resolveUrl(ctx.poster, ctx.base);
+  poster.alt = ctx.title ? `${ctx.title} preview` : "3D model preview";
+  poster.loading = "eager";
+  poster.addEventListener(
+    "error",
+    () => {
+      poster.remove();
+      ctx.posterEl = null;
+      if (ctx.autoLoad === false) scheduleLoad(ctx, "The preview loads when it becomes visible.");
+    },
+    { once: true }
+  );
+  ctx.posterEl = poster;
+  ctx.stage.appendChild(poster);
+}
 function finishSetup(ctx) {
   observeUnload(ctx);
+  createPoster(ctx);
   if (ctx.autoLoad === false) {
     if (ctx.chrome && ctx.hasCode && hasStaticModels(ctx)) {
       ctx.live = false;
       addRunButton(ctx);
       if (ctx.poster) {
-        const poster = el("img", "yacv-poster");
-        poster.src = resolveUrl(ctx.poster, ctx.base);
-        poster.alt = ctx.title ? `${ctx.title} preview` : "3D model preview";
-        poster.loading = "eager";
-        poster.addEventListener(
-          "error",
-          () => {
-            poster.remove();
-            ctx.posterEl = null;
-            scheduleLoad(ctx, "The preview loads when it becomes visible.");
-          },
-          { once: true }
-        );
-        ctx.posterEl = poster;
-        ctx.stage.appendChild(poster);
         const load2 = () => enqueueLoad(ctx, true);
         ctx.container.addEventListener("pointerenter", load2, { once: true });
         ctx.container.addEventListener("pointerdown", load2, { once: true });
         ctx.container.addEventListener("focusin", load2, { once: true });
+        ctx.container.addEventListener("click", load2, { once: true });
       } else {
         scheduleLoad(ctx, "The preview loads when it becomes visible.");
       }
@@ -1044,7 +1049,7 @@ function scheduleLoad(ctx, text) {
     enqueueLoad(ctx);
     return;
   }
-  showPlaceholder(ctx, { text });
+  if (!ctx.posterEl) showPlaceholder(ctx, { text });
   ensureObserver(ctx.options).observe(ctx.stage);
   observedStages.add(ctx.stage);
 }
@@ -1315,7 +1320,8 @@ function load(ctx, slot = ctx.activeSlotId) {
     return ctx.loading;
   }
   setState(ctx, "loading");
-  showPlaceholder(ctx, { spinner: true, text: "Loading 3D viewer\u2026" });
+  if (ctx.posterEl) ctx.posterEl.hidden = false;
+  else showPlaceholder(ctx, { spinner: true, text: "Loading 3D viewer\u2026" });
   const loading = (async () => {
     try {
       if (ctx.iframe) {

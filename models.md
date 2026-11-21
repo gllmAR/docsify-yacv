@@ -6,7 +6,7 @@ controls and measurements are identical.
 
 ## Local GLB files
 
-```yacv height=420 title="Two exported models"
+```yacv height=420 title="Two exported models" poster="assets/previews/models.png"
 assets/cube.glb
 assets/cylinder.glb#name=cylinder
 ```
@@ -129,7 +129,7 @@ let you pin the viewer version. You can also override the viewer for a single em
 A single embed can do both: the static models appear immediately, and the playground output is
 added when the Python code finishes running.
 
-```build123d height=440 title="Static preview + live playground" src="assets/cube.glb" preview="assets/previews/live.glb#name=live"
+```build123d height=440 title="Static preview + live playground" src="assets/cube.glb" preview="assets/previews/live.glb#name=live" poster="assets/previews/live.png"
 from build123d import *
 
 with BuildPart() as live:
