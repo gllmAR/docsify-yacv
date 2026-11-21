@@ -206,17 +206,6 @@ test.describe('docsify-yacv', () => {
     expect(viewerParams(after).get('pg_code')).toBe(viewerParams(before).get('pg_code'));
   });
 
-  test('works with docsify 4.x', async ({ page }) => {
-    await page.goto('/index-v4.html');
-    const embeds = page.locator('.yacv-embed');
-    await expect(embeds).toHaveCount(6);
-    await embeds.nth(0).scrollIntoViewIfNeeded();
-    const src = await iframeSrc(page, embeds.nth(0));
-    expect(decodeCode(viewerParams(src))).toContain('with BuildPart() as part:');
-    expect(await embeds.nth(0).locator('.yacv-stage').evaluate(el => el.style.height)).toBe('321px');
-    await expect(embeds.nth(0).locator('.yacv-title')).toHaveText('Bracket demo');
-  });
-
   test('does not emit plugin errors', async ({ page }) => {
     /** @type {string[]} */
     const problems = [];

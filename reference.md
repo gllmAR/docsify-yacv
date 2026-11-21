@@ -198,8 +198,7 @@ The embed inherits the page text color. Override these custom properties on `.ya
 ```
 
 Styles are injected once (`#docsify-yacv-styles`) and do not depend on a docsify theme. The plugin
-targets docsify 5 and also works with docsify 4.x. On docsify 4, fence info strings are not escaped,
-so use single quotes for values with spaces (`title='My bracket'`) or `<yacv title="My bracket">`.
+targets docsify 5.x and newer.
 
 ## Troubleshooting
 

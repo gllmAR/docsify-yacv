@@ -54,13 +54,13 @@
     "watch": "node scripts/build.mjs --watch",
     "demo": "node scripts/serve-demo.mjs",
     "demo:models": "node scripts/make-demo-glb.mjs",
-    "test": "node --test test/unit/",
+    "test": "node --test \"test/unit/*.test.js\"",
     "test:e2e": "npm run build && playwright test",
     "test:all": "npm test && npm run test:e2e",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
-    "docsify": ">=4.12.0"
+    "docsify": ">=5.0.0"
   },
   "peerDependenciesMeta": {
     "docsify": {
@@ -73,7 +73,6 @@
   "devDependencies": {
     "@playwright/test": "^1.62.0",
     "docsify": "^5.1.0",
-    "docsify4": "npm:docsify@^4.13.1",
     "esbuild": "^0.28.2"
   }
 }

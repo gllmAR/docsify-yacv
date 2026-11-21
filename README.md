@@ -298,9 +298,7 @@ date with `src/`.
 
 ## Compatibility
 
-- docsify 5.x (tested) and docsify 4.x.
-- On docsify 4, fence info strings are not escaped, so use single quotes for values with spaces
-  (`title='My bracket'`) or `<yacv title="My bracket">`.
+- docsify 5.x and newer.
 - Modern browsers with `IntersectionObserver`; `CompressionStream` enables compact code URLs.
 - No runtime dependencies.
 
