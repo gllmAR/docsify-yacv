@@ -2275,11 +2275,11 @@
       runtime.ensure().then(() => {
         unsubscribe();
         if (ctx.warmUnsubscribe === unsubscribe) ctx.warmUnsubscribe = null;
-        if (!ctx.workerPromise) setWorkerState(ctx, "ready");
+        if (ctx.workerMode && !ctx.workerPromise) setWorkerState(ctx, "ready");
       }).catch((err) => {
         unsubscribe();
         if (ctx.warmUnsubscribe === unsubscribe) ctx.warmUnsubscribe = null;
-        if (!ctx.workerPromise) setWorkerState(ctx, "error");
+        if (ctx.workerMode && !ctx.workerPromise) setWorkerState(ctx, "error");
         console.warn("[docsify-yacv] Python worker warmup failed:", err);
       });
     };
