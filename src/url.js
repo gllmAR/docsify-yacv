@@ -112,6 +112,34 @@ export function parseShowCode(value) {
 }
 
 /**
+ * Resolves all static model URLs for an embed (attrs + spec models), removing
+ * duplicates. Shared by the URL builder and the model prefetcher.
+ *
+ * @param {Object} params
+ * @param {string[]} [params.models]
+ * @param {Record<string, unknown>} [params.attrs]
+ * @param {string | ((src: string) => string)} [params.base]
+ * @returns {string[]}
+ */
+export function resolveModelUrls({ models = [], attrs = {}, base } = {}) {
+  attrs = normalizeAttrs(attrs);
+  const candidates = [
+    ...splitList(pickAttr(attrs, 'models')),
+    ...splitList(pickAttr(attrs, 'src')),
+    ...splitList(pickAttr(attrs, 'preview')),
+    ...splitList(pickAttr(attrs, 'preload')),
+    ...models,
+  ];
+  /** @type {string[]} */
+  const resolved = [];
+  for (const candidate of candidates) {
+    const url = resolveUrl(candidate, base);
+    if (url && !resolved.includes(url)) resolved.push(url);
+  }
+  return resolved;
+}
+
+/**
  * Builds the yacv viewer URL parameters for one embed.
  *
  * @param {Object} params
@@ -163,18 +191,7 @@ export function buildParams({ hasCode, models = [], attrs = {}, options, base })
   }
 
   // 4. Static models to preload (in addition to any playground output).
-  const modelCandidates = [
-    ...splitList(pickAttr(attrs, 'models')),
-    ...splitList(pickAttr(attrs, 'src')),
-    ...splitList(pickAttr(attrs, 'preview')),
-    ...splitList(pickAttr(attrs, 'preload')),
-    ...models,
-  ];
-  const resolvedModels = [];
-  for (const candidate of modelCandidates) {
-    const url = resolveUrl(candidate, base);
-    if (url && !resolvedModels.includes(url)) resolvedModels.push(url);
-  }
+  const resolvedModels = resolveModelUrls({ models, attrs, base });
   for (const url of resolvedModels) params.append('preload', url);
 
   if (!hasCode && resolvedModels.length === 0 && params.toString() === '') return null;

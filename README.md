@@ -236,6 +236,7 @@ window.$docsify = {
 | `editor` | `0` | In-iframe Monaco opacity (`0` hides it; docsify shows the code). Ignored by the headless viewer. |
 | `lazy` | `true` | Create iframes when they approach the viewport. |
 | `preloadViewer` | `true` | Preload the viewer's main modules/styles from `viewer/manifest.json`. |
+| `prefetchModels` | `true` | Preload static GLB/GLTF bytes when the model origin differs from the viewer. |
 | `lazyMargin` | `200px` | How far before the viewport lazy embeds start loading. |
 | `maxConcurrent` | `2` | Maximum iframes created at the same time. |
 | `maxLiveConcurrent` | `2` | Maximum live build123d sandboxes loaded at once. |
@@ -374,6 +375,9 @@ unused wheels, which is where the ~6s improvement comes from. Practical mitigati
 - **Tune `lazyMargin`** (default `200px`): smaller values avoid starting off-screen sandboxes early.
 - The plugin adds `preconnect`/`dns-prefetch` hints for the viewer, Pyodide CDN and (on live pages)
   PyPI/OCP.wasm origins.
+- Static models are prefetched with `<link rel="preload" as="fetch">` when an embed is queued and
+  the model is on a different origin than the viewer, overlapping the model download with the viewer
+  app boot. Turn it off with `prefetchModels: false`.
 
 ## Static hosting
 

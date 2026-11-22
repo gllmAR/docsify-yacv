@@ -76,6 +76,12 @@ export interface DocsifyYacvOptions {
    */
   sharedWorker?: boolean;
   /**
+   * Preload static GLB/GLTF bytes when the model origin differs from the viewer.
+   * Default: true. Models on the viewer's own origin are skipped to avoid
+   * duplicate downloads.
+   */
+  prefetchModels?: boolean;
+  /**
    * Cache worker GLB results in IndexedDB, keyed by code and interpreter
    * settings. Unchanged snippets render without booting Pyodide on repeat
    * visits. Default: true.

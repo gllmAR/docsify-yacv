@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>model prefetch e2e</title></head>
+  <body>
+    <div id="app"></div>
+    <script>
+      window.$docsify = {
+        name: 'model prefetch',
+        homepage: 'prefetch.md',
+        basePath: '/',
+        yacv: {
+          runtime: 'viewer',
+          // Different origin from the page so the plugin preloads model bytes
+          // with CORS, matching the viewer's own cross-origin fetch.
+          viewer: 'http://localhost:8123/viewer-stub.html',
+          openViewer: 'http://localhost:8123/viewer-stub.html?open=1',
+          version: '0.9.1',
+          lazy: false,
+          unloadOffscreen: false,
+          prefetchModels: true,
+        },
+      };
+    </script>
+    <script src="/docsify.min.js"></script>
+    <script src="/docsify-yacv.js"></script>
+  </body>
+</html>

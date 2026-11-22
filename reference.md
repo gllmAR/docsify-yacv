@@ -46,6 +46,7 @@ window.$docsify = {
 | `editor`       | `number \| string`  | `0`                                              | Opacity of the in-iframe Monaco editor. `0` hides it (code is shown by docsify instead); `show` = `0.9`. Ignored by the headless viewer. |
 | `lazy`         | `boolean`           | `true`                                           | Create the iframe only when the embed approaches the viewport. |
 | `preloadViewer` | `boolean`          | `true`                                           | Preload viewer modules/styles from `viewer/manifest.json`. |
+| `prefetchModels` | `boolean`         | `true`                                           | Preload GLB/GLTF bytes on a different origin than the viewer. |
 | `lazyMargin`   | `string \| number`  | `200px`                                          | How far before the viewport a lazy embed starts loading. |
 | `maxConcurrent` | `number`           | `2`                                              | Maximum iframes created at the same time (nearest first). |
 | `maxLiveConcurrent` | `number`        | `2`                                              | Maximum loaded live build123d sandboxes. A sandbox holds the slot until unloaded or `liveSlotMs`. |
@@ -218,6 +219,19 @@ npm run viewer:manifest
 ```
 
 Set `preloadViewer: false` if you do not want to preload the viewer.
+
+## Model prefetching
+
+When a static embed is queued, the plugin adds
+`<link rel="preload" as="fetch" crossorigin="anonymous">` for each GLB/GLTF URL **on a different
+origin than the viewer** (the default: docs-hosted models, hosted viewer). The model starts
+downloading while the viewer application boots; the viewer's own CORS fetch then reuses the HTTP
+cache entry. Models served from the viewer's own origin are skipped because their credentials mode
+would not match the preload. Disable with:
+
+```js
+window.$docsify = { yacv: { prefetchModels: false } };
+```
 
 ## Shared worker runtime
 

@@ -2,9 +2,16 @@ import { encodeCode } from './encode.js';
 import { ensureResourceHints } from './hints.js';
 import { highlightPrePython, highlightPython } from './highlight.js';
 import { classifyFence, looksLikePython, parseInfoString, parseModelBlock } from './parse.js';
-import { buildParams, buildViewerUrl, normalizeConstraints, parseShowCode, resolveBase } from './url.js';
+import {
+  buildParams,
+  buildViewerUrl,
+  normalizeConstraints,
+  parseShowCode,
+  resolveBase,
+  resolveModelUrls,
+} from './url.js';
 import { copyText, cssSize, normalizeKey, resolveUrl, splitList, toBool } from './util.js';
-import { preloadViewerAssets } from './preload.js';
+import { prefetchModelAssets, preloadViewerAssets } from './preload.js';
 import { getWorkerRuntime } from './worker-runtime.js';
 import { getCachedResult, putCachedResult } from './result-cache.js';
 
@@ -642,6 +649,16 @@ function pruneObserver() {
  */
 function enqueueLoad(ctx, priority = false) {
   if (ctx.state === 'ready' || ctx.state === 'loading' || ctx.state === 'error') return;
+  // Start static model bytes downloading while the viewer app boots. Only
+  // models on another origin than the viewer are preloaded: the viewer fetches
+  // those with CORS, which matches the preload's mode/credentials.
+  if (ctx.options.prefetchModels !== false) {
+    prefetchModelAssets(
+      resolveModelUrls({ models: ctx.models, attrs: ctx.attrs, base: ctx.base }),
+      ctx.viewer,
+      ctx.base,
+    );
+  }
   if (ctx.queued) {
     if (priority) {
       const idx = loadQueue.indexOf(ctx);

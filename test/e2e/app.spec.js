@@ -87,6 +87,23 @@ test.describe('docsify-yacv', () => {
 
     // The asset path list is not useful reading material.
     await expect(page.locator('.yacv-code').nth(1)).toBeHidden();
+    // Viewer and models share an origin here: no CORS model preload is added.
+    await expect(page.locator('link[rel="preload"][as="fetch"]')).toHaveCount(0);
+  });
+
+  test('prefetches static models for a cross-origin viewer', async ({ page }) => {
+    await page.goto('/index-prefetch.html');
+    const embed = page.locator('.yacv-embed').first();
+    await embed.scrollIntoViewIfNeeded();
+    const link = page.locator('link[rel="preload"][as="fetch"][href$="/assets/prefetch.glb"]');
+    await expect(link).toHaveCount(1);
+    expect(await link.getAttribute('crossorigin')).toBe('anonymous');
+
+    const iframe = embed.locator('iframe');
+    await expect(iframe).toHaveCount(1);
+    const src = await iframe.getAttribute('src');
+    expect(src).toContain('localhost:8123/viewer-stub.html');
+    expect(viewerParams(src).getAll('preload')).toEqual(['http://127.0.0.1:8123/assets/prefetch.glb']);
   });
 
   test('supports <yacv> tags with inline Python', async ({ page }) => {

@@ -421,6 +421,7 @@ function resolveOptions(userOptions = {}, vm = null) {
   merged.workerUrl = merged.workerUrl == null ? "" : String(merged.workerUrl);
   merged.workerWarmup = toBool(merged.workerWarmup, true);
   merged.sharedWorker = toBool(merged.sharedWorker, true);
+  merged.prefetchModels = toBool(merged.prefetchModels, true);
   merged.cache = toBool(merged.cache, true);
   merged.workerIdleMs = Math.max(0, Math.floor(toNumber(merged.workerIdleMs, 18e5)));
   merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
@@ -519,6 +520,22 @@ function parseShowCode(value) {
   if (["show", "true", "on", "yes", "1"].includes(s)) return true;
   return null;
 }
+function resolveModelUrls({ models = [], attrs = {}, base } = {}) {
+  attrs = normalizeAttrs(attrs);
+  const candidates = [
+    ...splitList(pickAttr(attrs, "models")),
+    ...splitList(pickAttr(attrs, "src")),
+    ...splitList(pickAttr(attrs, "preview")),
+    ...splitList(pickAttr(attrs, "preload")),
+    ...models
+  ];
+  const resolved = [];
+  for (const candidate of candidates) {
+    const url = resolveUrl(candidate, base);
+    if (url && !resolved.includes(url)) resolved.push(url);
+  }
+  return resolved;
+}
 function buildParams({ hasCode, models = [], attrs = {}, options, base }) {
   const params = new URLSearchParams();
   attrs = normalizeAttrs(attrs);
@@ -548,18 +565,7 @@ function buildParams({ hasCode, models = [], attrs = {}, options, base }) {
     if (!params.has("pg_opacity_loading")) params.set("pg_opacity_loading", String(editor));
     if (!params.has("pg_opacity_loaded")) params.set("pg_opacity_loaded", String(editor));
   }
-  const modelCandidates = [
-    ...splitList(pickAttr(attrs, "models")),
-    ...splitList(pickAttr(attrs, "src")),
-    ...splitList(pickAttr(attrs, "preview")),
-    ...splitList(pickAttr(attrs, "preload")),
-    ...models
-  ];
-  const resolvedModels = [];
-  for (const candidate of modelCandidates) {
-    const url = resolveUrl(candidate, base);
-    if (url && !resolvedModels.includes(url)) resolvedModels.push(url);
-  }
+  const resolvedModels = resolveModelUrls({ models, attrs, base });
   for (const url of resolvedModels) params.append("preload", url);
   if (!hasCode && resolvedModels.length === 0 && params.toString() === "") return null;
   return params;
@@ -590,6 +596,7 @@ function resolveBase(options, vm) {
 
 // src/preload.js
 var started = /* @__PURE__ */ new Set();
+var modelPreloads = /* @__PURE__ */ new Set();
 function preloadViewerAssets(viewer, base) {
   if (typeof document === "undefined" || typeof fetch === "undefined") return;
   let url;
@@ -630,6 +637,33 @@ function preloadViewerAssets(viewer, base) {
     for (const file of manifest.styles || []) add2(file, "preload", "style");
   }).catch(() => {
   });
+}
+function prefetchModelAssets(urls, viewer, base) {
+  if (typeof document === "undefined" || !urls || urls.length === 0) return;
+  let viewerOrigin = "";
+  try {
+    viewerOrigin = new URL(resolveUrl(viewer, base) || viewer, document.baseURI).origin;
+  } catch {
+  }
+  for (const raw of urls) {
+    let href;
+    try {
+      href = new URL(String(raw), document.baseURI).href;
+    } catch {
+      continue;
+    }
+    if (!/^https?:/i.test(href) || modelPreloads.has(href)) continue;
+    if (viewerOrigin && new URL(href).origin === viewerOrigin) continue;
+    modelPreloads.add(href);
+    const link = document.createElement("link");
+    link.rel = "preload";
+    link.as = "fetch";
+    link.href = href;
+    link.crossOrigin = "anonymous";
+    link.fetchPriority = "low";
+    link.addEventListener("error", () => link.remove(), { once: true });
+    document.head.appendChild(link);
+  }
 }
 
 // src/worker-runtime.js
@@ -1490,6 +1524,13 @@ function pruneObserver() {
 }
 function enqueueLoad(ctx, priority = false) {
   if (ctx.state === "ready" || ctx.state === "loading" || ctx.state === "error") return;
+  if (ctx.options.prefetchModels !== false) {
+    prefetchModelAssets(
+      resolveModelUrls({ models: ctx.models, attrs: ctx.attrs, base: ctx.base }),
+      ctx.viewer,
+      ctx.base
+    );
+  }
   if (ctx.queued) {
     if (priority) {
       const idx = loadQueue.indexOf(ctx);
