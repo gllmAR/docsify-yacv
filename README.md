@@ -233,6 +233,7 @@ window.$docsify = {
 | `constraints` | `''` | Pip constraints (`;`/newline separated or JSON mapping). |
 | `editor` | `0` | In-iframe Monaco opacity (`0` hides it; docsify shows the code). Ignored by the headless viewer. |
 | `lazy` | `true` | Create iframes when they approach the viewport. |
+| `preloadViewer` | `true` | Preload the viewer's main modules/styles from `viewer/manifest.json`. |
 | `lazyMargin` | `200px` | How far before the viewport lazy embeds start loading. |
 | `maxConcurrent` | `2` | Maximum iframes created at the same time. |
 | `maxLiveConcurrent` | `2` | Maximum live build123d sandboxes loaded at once. |

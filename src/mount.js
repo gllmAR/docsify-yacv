@@ -4,6 +4,7 @@ import { highlightPrePython, highlightPython } from './highlight.js';
 import { classifyFence, looksLikePython, parseInfoString, parseModelBlock } from './parse.js';
 import { buildParams, buildViewerUrl, normalizeConstraints, parseShowCode, resolveBase } from './url.js';
 import { copyText, cssSize, normalizeKey, resolveUrl, splitList, toBool } from './util.js';
+import { preloadViewerAssets } from './preload.js';
 import { getWorkerRuntime } from './worker-runtime.js';
 import { getCachedResult, putCachedResult } from './result-cache.js';
 
@@ -249,6 +250,9 @@ function createEmbed(spec, vm, options) {
   const title = stringAttr(pick(attrs, 'title')) || options.title || '';
   const poster = stringAttr(pick(attrs, 'poster')) || options.poster || '';
   const viewer = stringAttr(pick(attrs, 'viewer')) || options.viewer;
+  if (options.preloadViewer !== false) {
+    preloadViewerAssets(viewer, typeof base === 'function' ? base(viewer) : base);
+  }
   const openViewer = stringAttr(pick(attrs, 'openviewer')) || options.openViewer || viewer;
   const version =
     stringAttr(pick(attrs, 'version', 'b3dversion', 'pgversion', 'pg_version')) || options.version;

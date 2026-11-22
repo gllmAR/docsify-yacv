@@ -52,6 +52,8 @@ export interface DocsifyYacvOptions {
   editor?: number | string | boolean;
   /** Defer iframe creation until the embed scrolls into view. Default: true. */
   lazy?: boolean;
+  /** Preload the viewer's main modules/styles from viewer/manifest.json. Default: true. */
+  preloadViewer?: boolean;
   /** How far before the viewport lazy embeds start loading. Default: "200px". */
   lazyMargin?: string | number;
   /**

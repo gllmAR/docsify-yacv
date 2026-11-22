@@ -18,6 +18,9 @@ It is built from the patched viewer used by
 - the (lazily loaded, unused in host mode) Monaco assets are pruned from the
   build.
 
+`manifest.json` lists the modules/styles preloaded by the plugin; regenerate it with
+`npm run viewer:manifest` when the build changes.
+
 `index.html` was adapted for docsify-yacv: it enables host mode and selects
 Python mode only when the URL hash contains `pg_code`; static/preview embeds run
 in mesh mode and never bootstrap Pyodide.

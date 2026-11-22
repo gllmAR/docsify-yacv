@@ -105,6 +105,8 @@ export const DEFAULT_OPTIONS = {
   editor: 0,
   /** Defer iframe creation until the embed scrolls into view. */
   lazy: true,
+  /** Preload the viewer's main modules/styles from viewer/manifest.json. */
+  preloadViewer: true,
   /** How far before the viewport (CSS px or %) a lazy embed starts loading. */
   lazyMargin: '200px',
   /**
@@ -177,6 +179,7 @@ export function resolveOptions(userOptions = {}, vm = null) {
   merged.constraints = merged.constraints == null ? '' : String(merged.constraints);
   merged.editor = normalizeEditor(merged.editor, 0);
   merged.lazy = toBool(merged.lazy, true);
+  merged.preloadViewer = toBool(merged.preloadViewer, true);
   merged.lazyMargin = normalizeMargin(merged.lazyMargin, DEFAULT_OPTIONS.lazyMargin);
   merged.unloadMargin = normalizeMargin(merged.unloadMargin, DEFAULT_OPTIONS.unloadMargin);
   merged.runtime = merged.runtime === 'worker' ? 'worker' : 'viewer';
@@ -254,6 +257,7 @@ export function normalizeEditor(value, fallback = 0) {
  * @property {string} [constraints] Global pip constraints (newline separated).
  * @property {number | string | boolean} [editor] In-iframe playground editor opacity (0 = hidden).
  * @property {boolean} [lazy] Only create the iframe when scrolled into view.
+ * @property {boolean} [preloadViewer] Preload the viewer modules/styles from its manifest.
  * @property {string | number} [lazyMargin] Viewport margin for lazy loading (px or %).
  * @property {'viewer' | 'worker'} [runtime] Python runtime: per-viewer or shared worker.
  * @property {string} [workerUrl] Same-origin module worker for `runtime: 'worker'`.

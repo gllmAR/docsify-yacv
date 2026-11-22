@@ -350,6 +350,8 @@ var DEFAULT_OPTIONS = {
   editor: 0,
   /** Defer iframe creation until the embed scrolls into view. */
   lazy: true,
+  /** Preload the viewer's main modules/styles from viewer/manifest.json. */
+  preloadViewer: true,
   /** How far before the viewport (CSS px or %) a lazy embed starts loading. */
   lazyMargin: "200px",
   /**
@@ -412,6 +414,7 @@ function resolveOptions(userOptions = {}, vm = null) {
   merged.constraints = merged.constraints == null ? "" : String(merged.constraints);
   merged.editor = normalizeEditor(merged.editor, 0);
   merged.lazy = toBool(merged.lazy, true);
+  merged.preloadViewer = toBool(merged.preloadViewer, true);
   merged.lazyMargin = normalizeMargin(merged.lazyMargin, DEFAULT_OPTIONS.lazyMargin);
   merged.unloadMargin = normalizeMargin(merged.unloadMargin, DEFAULT_OPTIONS.unloadMargin);
   merged.runtime = merged.runtime === "worker" ? "worker" : "viewer";
@@ -582,6 +585,50 @@ function resolveBase(options, vm) {
     }
   }
   return typeof document !== "undefined" ? document.baseURI : "";
+}
+
+// src/preload.js
+var started = /* @__PURE__ */ new Set();
+function preloadViewerAssets(viewer, base) {
+  if (typeof document === "undefined" || typeof fetch === "undefined") return;
+  let url;
+  try {
+    url = new URL(viewer, typeof base === "string" ? base : document.baseURI);
+  } catch {
+    return;
+  }
+  if (!url.pathname.endsWith("/")) return;
+  const manifestUrl = new URL("manifest.json", url).href;
+  if (started.has(manifestUrl)) return;
+  started.add(manifestUrl);
+  fetch(manifestUrl, { mode: "cors", credentials: "omit" }).then((response) => response.ok ? response.json() : null).then((manifest) => {
+    if (!manifest) return;
+    const existing = new Set(
+      Array.from(document.querySelectorAll("link[href]")).map((link) => (
+        /** @type {HTMLLinkElement} */
+        link.href
+      ))
+    );
+    const add2 = (file, rel, as) => {
+      let href;
+      try {
+        href = new URL(String(file), url).href;
+      } catch {
+        return;
+      }
+      if (!href || existing.has(href)) return;
+      const link = document.createElement("link");
+      link.rel = rel;
+      if (as) link.as = as;
+      link.href = href;
+      link.crossOrigin = "anonymous";
+      document.head.appendChild(link);
+      existing.add(href);
+    };
+    for (const file of manifest.modules || []) add2(file, "modulepreload");
+    for (const file of manifest.styles || []) add2(file, "preload", "style");
+  }).catch(() => {
+  });
 }
 
 // src/worker-runtime.js
@@ -1104,6 +1151,9 @@ function createEmbed(spec, vm, options) {
   const title = stringAttr(pick(attrs, "title")) || options.title || "";
   const poster = stringAttr(pick(attrs, "poster")) || options.poster || "";
   const viewer = stringAttr(pick(attrs, "viewer")) || options.viewer;
+  if (options.preloadViewer !== false) {
+    preloadViewerAssets(viewer, typeof base === "function" ? base(viewer) : base);
+  }
   const openViewer = stringAttr(pick(attrs, "openviewer")) || options.openViewer || viewer;
   const version = stringAttr(pick(attrs, "version", "b3dversion", "pgversion", "pg_version")) || options.version;
   const modelCount = spec.models.length + splitList(pick(attrs, "models")).length + splitList(pick(attrs, "src")).length + splitList(pick(attrs, "preview")).length + splitList(pick(attrs, "preload")).length;
@@ -2493,7 +2543,19 @@ function docsifyYacv(userOptions = {}) {
       injectStyles();
     });
     if (typeof hook.beforeEach === "function") {
-      hook.beforeEach((markdown) => normalizeTagWhitespace(markdown));
+      hook.beforeEach((markdown) => {
+        const text = markdown == null ? "" : String(markdown);
+        if (/(^|\n)```[^\n]*(?:yacv|build123d|b3d)/i.test(text) || /(^|\n)\s*<yacv\b/i.test(text)) {
+          const options2 = getOptions();
+          if (options2.preloadViewer !== false) {
+            preloadViewerAssets(
+              options2.viewer,
+              typeof options2.base === "string" ? options2.base : document.baseURI
+            );
+          }
+        }
+        return normalizeTagWhitespace(text);
+      });
     }
     if (typeof hook.doneEach === "function") {
       hook.doneEach(() => {

@@ -44,6 +44,7 @@ window.$docsify = {
 | `constraints`  | `string`            | `''`                                             | Pip constraints for the sandbox, newline or `;` separated, or a JSON mapping. |
 | `editor`       | `number \| string`  | `0`                                              | Opacity of the in-iframe Monaco editor. `0` hides it (code is shown by docsify instead); `show` = `0.9`. Ignored by the headless viewer. |
 | `lazy`         | `boolean`           | `true`                                           | Create the iframe only when the embed approaches the viewport. |
+| `preloadViewer` | `boolean`          | `true`                                           | Preload viewer modules/styles from `viewer/manifest.json`. |
 | `lazyMargin`   | `string \| number`  | `200px`                                          | How far before the viewport a lazy embed starts loading. |
 | `maxConcurrent` | `number`           | `2`                                              | Maximum iframes created at the same time (nearest first). |
 | `maxLiveConcurrent` | `number`        | `2`                                              | Maximum loaded live build123d sandboxes. A sandbox holds the slot until unloaded or `liveSlotMs`. |
@@ -203,6 +204,19 @@ window.$docsify = {
 ```
 
 Set `viewer` to the upstream URL if you need the in-page Monaco editor (`editor` option).
+
+## Viewer preloading
+
+`viewer/manifest.json` lists the viewer's main modules and stylesheet. When the first embed is
+created, the plugin fetches the manifest and injects `modulepreload` / style preload links, so the
+viewer bundle starts downloading before the iframe exists. Regenerate the manifest after replacing
+the viewer build:
+
+```bash
+npm run viewer:manifest
+```
+
+Set `preloadViewer: false` if you do not want to preload the viewer.
 
 ## Shared worker runtime
 
