@@ -144,11 +144,17 @@ show(screw)
 If a package needs native code that has not been compiled to WebAssembly, it will not work in the
 browser; export a static GLB instead.
 
-## Keep the sandbox editor open
+## Live editing and fullscreen
 
-The embedded demos run the headless, shared-worker viewer, so the in-page Monaco editor is not
-loaded. Use **Open** on any live example to get the full upstream viewer with the editor
-(`F10` runs, ▶ works there) without creating a second sandbox on the page.
+The embedded demos run the headless, shared-worker viewer, so Monaco is not loaded. Instead, every
+live code panel has an **Edit** action for in-place editing, and the toolbar has **Fullscreen** for
+a split code/viewer workspace that fills the page. Both use the same shared Python worker and the
+same viewer iframe, so the camera and loaded geometry stay put; `Ctrl/⌘+Enter` runs, `Escape`
+leaves fullscreen. The editor uses Pupitre UI's code-editor pattern and Prism Python highlighting.
+Set `autorun` on a fence (or `autorun: true` globally) to re-run after a short typing pause.
+
+**Open** still opens the full upstream yacv viewer with its Monaco playground (`F10` runs) in a new
+tab, for readers who want it.
 
 If you really want Monaco inside an embed, use the full upstream viewer and the per-viewer runtime.
 This creates one Pyodide instance **per viewer**, so it is intentionally not used in this demo:

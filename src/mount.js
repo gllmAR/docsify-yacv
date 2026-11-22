@@ -12,6 +12,7 @@ import {
 } from './url.js';
 import { copyText, cssSize, normalizeKey, resolveUrl, splitList, toBool } from './util.js';
 import { prefetchModelAssets, preloadViewerAssets } from './preload.js';
+import { createCodeEditor } from './editor.js';
 import { getWorkerRuntime } from './worker-runtime.js';
 import { getCachedResult, putCachedResult } from './result-cache.js';
 
@@ -49,6 +50,8 @@ const ICONS = {
   play: 'M8,5.14V19.14L19,12.14L8,5.14Z',
   reload:
     'M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z',
+  fullscreen:
+    'M5,5H10V7H7V10H5V5M14,5H19V10H17V7H14V5M5,14H7V17H10V19H5V14M17,14H19V19H14V17H17V14Z',
 };
 
 /**
@@ -60,6 +63,7 @@ const ICONS = {
  */
 export function mountAll(vm, options) {
   if (typeof document === 'undefined') return;
+  if (fullscreenCtx && !fullscreenCtx.container.isConnected) closeFullscreen(fullscreenCtx);
   const root = document.querySelector('.markdown-section');
   if (!root) return;
   maxConcurrent = Math.max(1, Math.floor(options.maxConcurrent || 2));
@@ -152,7 +156,8 @@ function prepareFence(pre, vm, options) {
 
   if (inlineCode) {
     ctx.codeWrap = wrap;
-    addCopyButton(wrap, () => code);
+    addCopyButton(wrap, () => ctx.editedCode ?? code);
+    addEditButton(wrap, ctx);
   } else {
     // The block only lists asset paths: not useful reading material.
     wrap.hidden = true;
@@ -271,6 +276,21 @@ function createEmbed(spec, vm, options) {
     splitList(pick(attrs, 'preload')).length;
   const autoLoad = pick(attrs, 'autoload') === undefined ? options.autoLoad : toBool(pick(attrs, 'autoload'), options.autoLoad);
   const cache = pick(attrs, 'cache') === undefined ? options.cache : toBool(pick(attrs, 'cache'), options.cache);
+  const editable =
+    pick(attrs, 'editable', 'liveedit', 'editcode') === undefined
+      ? options.liveEdit !== false
+      : toBool(pick(attrs, 'editable', 'liveedit', 'editcode'), options.liveEdit !== false);
+  const autorun =
+    pick(attrs, 'autorun', 'runonchange') === undefined
+      ? options.autorun === true
+      : toBool(pick(attrs, 'autorun', 'runonchange'), options.autorun === true);
+  const puiCssPick = pick(attrs, 'puicss');
+  const puiCss =
+    puiCssPick === undefined
+      ? options.puiCss || ''
+      : toBool(puiCssPick, true)
+        ? stringAttr(puiCssPick) || ''
+        : '';
   const runtimeMode = stringAttr(pick(attrs, 'runtime')) || options.runtime;
   const workerUrl = stringAttr(pick(attrs, 'worker', 'workerurl')) || options.workerUrl;
   const sameOriginViewer = sameOrigin(viewer);
@@ -386,6 +406,22 @@ function createEmbed(spec, vm, options) {
     progressStarted: 0,
     workerUnsubscribe: null,
     warmUnsubscribe: null,
+    editable,
+    autorun,
+    puiCss,
+    editedCode: spec.code && spec.code.trim() ? spec.code : null,
+    originalCode: spec.code && spec.code.trim() ? spec.code : null,
+    inlineEditor: null,
+    inlinePane: null,
+    inlineOpen: false,
+    fsEditor: null,
+    fsPane: null,
+    fsStatus: null,
+    fsBtn: null,
+    fullscreen: false,
+    runningEdit: false,
+    lastRunCode: null,
+    autorunTimer: null,
     version,
     autoLoad,
     cache,
@@ -423,6 +459,7 @@ function createEmbed(spec, vm, options) {
   const openAttr = pick(attrs, 'open');
   if (chrome && options.openInNewTab && (openAttr === undefined || toBool(openAttr, true))) addOpenButton(ctx);
   if (hasCode) addReloadButton(ctx);
+  addFullscreenButton(ctx);
 
   const hasBadge = hasCode || modelCount > 1;
   if (!chrome || (!title && !hasBadge && ctx.actions.childElementCount === 0)) {
@@ -892,13 +929,21 @@ function removeFromQueue(ctx) {
  * @returns {Promise<string | null>}
  */
 function ensureCode(ctx) {
-  if (ctx.inlineCode) return Promise.resolve(ctx.inlineCode);
-  if (ctx.fetchedCode != null) return Promise.resolve(ctx.fetchedCode);
+  if (ctx.editedCode != null) return Promise.resolve(ctx.editedCode);
+  if (ctx.inlineCode) {
+    ctx.originalCode = ctx.originalCode ?? ctx.inlineCode;
+    return Promise.resolve(ctx.inlineCode);
+  }
+  if (ctx.fetchedCode != null) {
+    ctx.originalCode = ctx.originalCode ?? ctx.fetchedCode;
+    return Promise.resolve(ctx.fetchedCode);
+  }
   if (!ctx.codeUrl) return Promise.resolve(null);
   if (ctx.codePromise) return ctx.codePromise;
   const resolved = resolveUrl(ctx.codeUrl, ctx.base);
   const promise = fetchCode(resolved).then(code => {
     ctx.fetchedCode = code;
+    ctx.originalCode = ctx.originalCode ?? code;
     return code;
   });
   ctx.codePromise = promise.catch(err => {
@@ -1191,10 +1236,418 @@ function createCodePanel(ctx, code) {
   highlightPython(codeEl, code);
   pre.appendChild(codeEl);
   wrap.appendChild(pre);
-  addCopyButton(wrap, () => code);
+  ctx.originalCode = ctx.originalCode ?? code;
+  ctx.editedCode = ctx.editedCode ?? code;
+  addCopyButton(wrap, () => ctx.editedCode ?? code);
+  addEditButton(wrap, ctx);
   ctx.container.before(wrap);
   ctx.codeWrap = wrap;
   applyCodeVisibility(ctx);
+}
+
+/** @type {EmbedContext | null} */
+let fullscreenCtx = null;
+
+/**
+ * Updates the displayed highlighted source without touching the host docsify
+ * block.
+ *
+ * @param {EmbedContext} ctx
+ * @param {string} code
+ */
+function updateCodeDisplay(ctx, code) {
+  if (!ctx.codeWrap) return;
+  const codeEl = ctx.codeWrap.querySelector('code');
+  if (codeEl) highlightPython(codeEl, code);
+}
+
+/**
+ * @param {EmbedContext} ctx
+ * @param {string} message
+ * @param {boolean} [error]
+ */
+function setEditorStatus(ctx, message, error) {
+  for (const status of [ctx.inlineStatus, ctx.fsStatus]) {
+    if (!status) continue;
+    status.textContent = message || '';
+    status.classList.toggle('is-error', !!error);
+  }
+}
+
+/**
+ * @param {EmbedContext} ctx
+ * @param {string} code
+ * @param {'inline' | 'fullscreen' | 'run' | 'reset' | 'sync'} source
+ */
+function setEditedCode(ctx, code, source) {
+  ctx.editedCode = code;
+  if (ctx.originalCode == null) ctx.originalCode = code;
+  if (source !== 'inline' && ctx.inlineEditor && ctx.inlineEditor.getValue() !== code) {
+    ctx.inlineEditor.setValue(code);
+  }
+  if (source !== 'fullscreen' && ctx.fsEditor && ctx.fsEditor.getValue() !== code) {
+    ctx.fsEditor.setValue(code);
+  }
+  updateCodeDisplay(ctx, code);
+}
+
+/**
+ * @param {EmbedContext} ctx
+ */
+function scheduleAutorun(ctx) {
+  if (!ctx.autorun || !ctx.editable) return;
+  if (ctx.autorunTimer) clearTimeout(ctx.autorunTimer);
+  ctx.autorunTimer = setTimeout(() => {
+    ctx.autorunTimer = null;
+    const code = ctx.editedCode;
+    if (code != null && code !== ctx.lastRunCode) void runEditedCode(ctx, code);
+  }, 900);
+}
+
+/**
+ * Runs the current editor source in the shared worker (or the viewer runtime)
+ * and applies the result to the same iframe, keeping fullscreen state intact.
+ *
+ * @param {EmbedContext} ctx
+ * @param {string} code
+ * @returns {Promise<void>}
+ */
+async function runEditedCode(ctx, code) {
+  if (code == null) return;
+  if (ctx.runningEdit) return;
+  ctx.runningEdit = true;
+  try {
+    await runEditedCodeOnce(ctx, code);
+  } finally {
+    ctx.runningEdit = false;
+    if (ctx.autorun && ctx.editedCode != null && ctx.editedCode !== ctx.lastRunCode) scheduleAutorun(ctx);
+  }
+}
+
+/**
+ * @param {EmbedContext} ctx
+ * @param {string} code
+ * @returns {Promise<void>}
+ */
+async function runEditedCodeOnce(ctx, code) {
+  if (!code.trim()) {
+    showErrorInStage(ctx, 'The code editor is empty.');
+    setEditorStatus(ctx, 'Code is empty.', true);
+    return;
+  }
+  if (ctx.autorunTimer) clearTimeout(ctx.autorunTimer);
+  ctx.autorunTimer = null;
+  setEditedCode(ctx, code, 'run');
+  ctx.live = true;
+  ctx.lastRunCode = code;
+  setEditorStatus(ctx, 'Running…');
+  if (!ctx.workerMode) {
+    reload(ctx);
+    return;
+  }
+  try {
+    if (ctx.workerPromise) await ctx.workerPromise;
+    await ensureLoaded(ctx);
+    if (!ctx.workerMode) {
+      // The worker failed and the embed switched to the per-viewer runtime.
+      reload(ctx);
+      return;
+    }
+    if (ctx.workerPromise) {
+      // Loading the mesh viewer started the run with the edited source.
+      await ctx.workerPromise;
+      setEditRunStatus(ctx);
+      return;
+    }
+    ctx.workerModels = null;
+    await startWorkerRun(ctx);
+    setEditRunStatus(ctx);
+  } catch (err) {
+    setEditorStatus(ctx, describeError(err), true);
+  }
+}
+
+/**
+ * @param {EmbedContext} ctx
+ */
+function setEditRunStatus(ctx) {
+  if (ctx.container.getAttribute('data-yacv-worker') === 'error') {
+    setEditorStatus(ctx, 'Python failed — see the viewer for the traceback.', true);
+    return;
+  }
+  if (ctx.workerModels && ctx.workerModels.length === 0) {
+    setEditorStatus(ctx, 'Ran successfully, but the code did not call show(...).');
+    return;
+  }
+  setEditorStatus(ctx, 'Model updated.');
+}
+
+/**
+ * @param {EmbedContext} ctx
+ * @param {string} code
+ */
+function onEditorChange(ctx, code, source) {
+  setEditedCode(ctx, code, source);
+  setEditorStatus(ctx, '');
+  scheduleAutorun(ctx);
+}
+
+/**
+ * @param {EmbedContext} ctx
+ * @returns {Promise<void>}
+ */
+async function openInlineEditor(ctx) {
+  if (!ctx.editable) return;
+  let code = ctx.editedCode;
+  if (code == null) {
+    try {
+      code = await ensureCode(ctx);
+    } catch (err) {
+      showErrorInStage(ctx, describeError(err));
+      return;
+    }
+  }
+  if (code == null) return;
+  if (!ctx.codeWrap) createCodePanel(ctx, code);
+  if (!ctx.codeWrap) return;
+  ctx.showCode = true;
+  applyCodeVisibility(ctx);
+
+  if (!ctx.inlinePane) {
+    const pane = el('div', 'yacv-inline-editor');
+    const host = el('div', 'yacv-editor-host');
+    const actions = el('div', 'yacv-editor-actions');
+    const run = el('button', 'yacv-btn yacv-btn-primary');
+    run.type = 'button';
+    run.appendChild(icon(ICONS.play));
+    run.appendChild(document.createTextNode('Run'));
+    const reset = el('button', 'yacv-btn');
+    reset.type = 'button';
+    reset.textContent = 'Reset';
+    const done = el('button', 'yacv-btn');
+    done.type = 'button';
+    done.textContent = 'Done';
+    const hint = el('span', 'yacv-editor-hint');
+    hint.textContent = ctx.autorun ? 'Auto-runs on pause · Ctrl/⌘+Enter' : 'Ctrl/⌘+Enter to run';
+    actions.append(run, reset, hint, done);
+    const status = el('p', 'yacv-editor-status');
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    pane.append(host, actions, status);
+    ctx.codeWrap.appendChild(pane);
+    ctx.inlinePane = pane;
+    ctx.inlineStatus = status;
+    run.addEventListener('click', () => void runEditedCode(ctx, ctx.inlineEditor?.getValue() ?? ctx.editedCode ?? code));
+    reset.addEventListener('click', () => {
+      const original = ctx.originalCode ?? code;
+      ctx.inlineEditor?.setValue(original);
+      setEditedCode(ctx, original, 'reset');
+      setEditorStatus(ctx, 'Reset to the original source.');
+    });
+    done.addEventListener('click', () => closeInlineEditor(ctx));
+    ctx.inlineEditor = await createCodeEditor(host, code, {
+      puiCss: ctx.puiCss,
+      label: 'build123d code',
+      onChange: value => onEditorChange(ctx, value, 'inline'),
+      onRun: () => void runEditedCode(ctx, ctx.inlineEditor?.getValue() ?? ctx.editedCode ?? code),
+      onEscape: () => closeInlineEditor(ctx),
+    });
+  }
+
+  ctx.inlineOpen = true;
+  ctx.inlinePane.hidden = false;
+  const pre = ctx.codeWrap.querySelector('pre');
+  if (pre) pre.hidden = true;
+  ctx.codeWrap.dataset.editing = 'true';
+  if (ctx.inlineEditor && ctx.inlineEditor.getValue() !== (ctx.editedCode ?? code)) {
+    ctx.inlineEditor.setValue(ctx.editedCode ?? code);
+  }
+  requestAnimationFrame(() => {
+    ctx.inlineEditor?.refresh();
+    ctx.inlineEditor?.focus();
+  });
+}
+
+/**
+ * @param {EmbedContext} ctx
+ */
+function closeInlineEditor(ctx) {
+  if (!ctx.inlineOpen) return;
+  ctx.inlineOpen = false;
+  if (ctx.inlinePane) ctx.inlinePane.hidden = true;
+  if (ctx.codeWrap) {
+    const pre = ctx.codeWrap.querySelector('pre');
+    if (pre) pre.hidden = false;
+    delete ctx.codeWrap.dataset.editing;
+    updateCodeDisplay(ctx, ctx.editedCode ?? ctx.originalCode ?? '');
+  }
+  applyCodeVisibility(ctx);
+}
+
+/**
+ * @param {EmbedContext} ctx
+ */
+function ensureFullscreenPane(ctx) {
+  if (ctx.fsPane) return ctx.fsPane;
+  const pane = el('div', 'yacv-fs-pane');
+  pane.hidden = true;
+  const head = el('div', 'yacv-fs-head');
+  const label = el('span', 'yacv-fs-title');
+  label.textContent = 'Code';
+  const badge = el('span', 'yacv-badge');
+  badge.textContent = `build123d · ${ctx.version}`;
+  const actions = el('div', 'yacv-fs-actions');
+  const run = el('button', 'yacv-btn yacv-btn-primary');
+  run.type = 'button';
+  run.appendChild(icon(ICONS.play));
+  run.appendChild(document.createTextNode('Run'));
+  const reset = el('button', 'yacv-btn');
+  reset.type = 'button';
+  reset.textContent = 'Reset';
+  actions.append(run, reset);
+  head.append(label, badge, actions);
+  const host = el('div', 'yacv-fs-editor-host');
+  const status = el('p', 'yacv-editor-status');
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  pane.append(head, host, status);
+  ctx.container.insertBefore(pane, ctx.stage);
+  ctx.fsPane = pane;
+  ctx.fsStatus = status;
+  ctx.fsHost = host;
+  ctx.fsRun = run;
+  ctx.fsReset = reset;
+  run.addEventListener('click', () => void runEditedCode(ctx, ctx.fsEditor?.getValue() ?? ctx.editedCode ?? ''));
+  reset.addEventListener('click', () => {
+    const original = ctx.originalCode ?? ctx.editedCode ?? '';
+    ctx.fsEditor?.setValue(original);
+    setEditedCode(ctx, original, 'reset');
+    setEditorStatus(ctx, 'Reset to the original source.');
+  });
+  return pane;
+}
+
+/**
+ * Opens the in-page fullscreen live-coding surface. The existing embed is
+ * promoted to a fixed viewport overlay with CSS; the iframe is never moved, so
+ * the loaded viewer, camera and shared worker are reused.
+ *
+ * @param {EmbedContext} ctx
+ * @returns {Promise<void>}
+ */
+async function openFullscreen(ctx) {
+  if (ctx.fullscreen) return;
+  ctx.fullscreen = true;
+  fullscreenCtx = ctx;
+  ctx.container.classList.add('yacv-fullscreen');
+  const editable = ctx.editable && ctx.hasCode;
+  ctx.container.classList.toggle('yacv-fs-no-editor', !editable);
+  ctx.container.setAttribute('role', 'dialog');
+  ctx.container.setAttribute('aria-modal', 'true');
+  ctx.container.setAttribute('aria-label', ctx.title || '3D model fullscreen');
+  document.body.classList.add('yacv-fs-open');
+  if (ctx.codeWrap) ctx.codeWrap.hidden = true;
+  if (ctx.codeBtn) ctx.codeBtn.hidden = true;
+  if (ctx.fsBtn) {
+    const label = ctx.fsBtn.querySelector('span');
+    if (label) label.textContent = 'Exit';
+    ctx.fsBtn.title = 'Exit fullscreen';
+    ctx.fsBtn.setAttribute('aria-label', 'Exit fullscreen');
+  }
+
+  if (editable) {
+    let code = ctx.editedCode;
+    if (code == null) {
+      try {
+        code = await ensureCode(ctx);
+      } catch (err) {
+        showErrorInStage(ctx, describeError(err));
+      }
+    }
+    if (!ctx.fullscreen) return;
+    if (code == null) {
+      ctx.container.classList.add('yacv-fs-no-editor');
+    }
+    if (code != null) {
+      const pane = ensureFullscreenPane(ctx);
+      pane.hidden = false;
+      if (!ctx.fsEditor) {
+        ctx.fsEditor = await createCodeEditor(ctx.fsHost, code, {
+          puiCss: ctx.puiCss,
+          label: 'build123d code',
+          onChange: value => onEditorChange(ctx, value, 'fullscreen'),
+          onRun: () => void runEditedCode(ctx, ctx.fsEditor?.getValue() ?? ctx.editedCode ?? code),
+          onEscape: () => closeFullscreen(ctx),
+        });
+      } else if (ctx.fsEditor.getValue() !== code) {
+        ctx.fsEditor.setValue(code);
+      }
+    }
+  }
+
+  ctx.fsKeyHandler = event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeFullscreen(ctx);
+    }
+  };
+  ctx.fsResizeHandler = () => ctx.fsEditor?.refresh();
+  document.addEventListener('keydown', ctx.fsKeyHandler);
+  window.addEventListener('resize', ctx.fsResizeHandler);
+  if (ctx.stage) void ensureLoaded(ctx);
+  requestAnimationFrame(() => {
+    ctx.fsEditor?.refresh();
+    ctx.fsEditor?.focus();
+  });
+}
+
+/**
+ * @param {EmbedContext} ctx
+ */
+function closeFullscreen(ctx) {
+  if (!ctx.fullscreen) return;
+  ctx.fullscreen = false;
+  if (fullscreenCtx === ctx) fullscreenCtx = null;
+  ctx.container.classList.remove('yacv-fullscreen', 'yacv-fs-no-editor');
+  ctx.container.removeAttribute('role');
+  ctx.container.removeAttribute('aria-modal');
+  ctx.container.removeAttribute('aria-label');
+  document.body.classList.remove('yacv-fs-open');
+  if (ctx.fsPane) ctx.fsPane.hidden = true;
+  if (ctx.codeWrap) applyCodeVisibility(ctx);
+  if (ctx.fsEditor) updateCodeDisplay(ctx, ctx.fsEditor.getValue());
+  if (ctx.fsKeyHandler) document.removeEventListener('keydown', ctx.fsKeyHandler);
+  if (ctx.fsResizeHandler) window.removeEventListener('resize', ctx.fsResizeHandler);
+  ctx.fsKeyHandler = null;
+  ctx.fsResizeHandler = null;
+  if (ctx.fsBtn) {
+    const label = ctx.fsBtn.querySelector('span');
+    if (label) label.textContent = 'Fullscreen';
+    ctx.fsBtn.title = ctx.editable && ctx.hasCode ? 'Fullscreen live editor' : 'Fullscreen viewer';
+    ctx.fsBtn.setAttribute('aria-label', ctx.editable && ctx.hasCode ? 'Fullscreen live editor' : 'Fullscreen viewer');
+    ctx.fsBtn.focus();
+  }
+}
+
+/**
+ * @param {EmbedContext} ctx
+ */
+function addFullscreenButton(ctx) {
+  if (!ctx.chrome || !ctx.actions) return;
+  const btn = el('button', 'yacv-btn');
+  btn.type = 'button';
+  btn.title = ctx.editable && ctx.hasCode ? 'Fullscreen live editor' : 'Fullscreen viewer';
+  btn.setAttribute('aria-label', btn.title);
+  btn.appendChild(icon(ICONS.fullscreen));
+  const label = el('span');
+  label.textContent = 'Fullscreen';
+  btn.appendChild(label);
+  btn.addEventListener('click', () => {
+    if (ctx.fullscreen) closeFullscreen(ctx);
+    else void openFullscreen(ctx);
+  });
+  ctx.actions.appendChild(btn);
+  ctx.fsBtn = btn;
 }
 
 /**
@@ -1342,17 +1795,18 @@ function onWorkerProgress(ctx, progress) {
  * @param {EmbedContext} ctx
  */
 function applyWorkerModels(ctx) {
-  if (!ctx.workerMode || !ctx.workerModels || !ctx.workerModels.length) return;
+  if (!ctx.workerMode || ctx.workerModels == null) return;
   const iframe = ctx.iframe;
   if (!iframe || !iframe.contentWindow) return;
+  const models = ctx.workerModels;
 
   const nextNames = new Set();
-  for (const model of ctx.workerModels) nextNames.add(model.name);
+  for (const model of models) nextNames.add(model.name);
 
   const api = ctx.sameOriginViewer ? viewerApi(iframe) : null;
   if (api) {
     const ViewerBlob = iframe.contentWindow.Blob || Blob;
-    for (const model of ctx.workerModels) {
+    for (const model of models) {
       try {
         // Construct the Blob in the viewer realm: a Blob created in the parent
         // frame fails `instanceof Blob` inside the iframe and is treated as a URL.
@@ -1375,7 +1829,7 @@ function applyWorkerModels(ctx) {
     // Cross-origin viewer: transfer a copy of each GLB to the bridge in
     // viewer/index.html.
     const target = viewerTargetOrigin(ctx);
-    for (const model of ctx.workerModels) {
+    for (const model of models) {
       const copy = model.bytes.slice();
       try {
         iframe.contentWindow.postMessage(
@@ -1401,6 +1855,13 @@ function applyWorkerModels(ctx) {
 
   ctx.appliedWorkerNames = [...nextNames];
   setWorkerState(ctx, 'ready');
+  if (models.length === 0) {
+    showPlaceholder(ctx, {
+      text: 'No objects were shown. Call show(...) to display a model.',
+    });
+    return;
+  }
+  clearPlaceholder(ctx);
   if (ctx.posterEl) ctx.posterEl.hidden = true;
 }
 
@@ -1487,18 +1948,13 @@ async function attachWorkerModels(ctx, iframe) {
  */
 async function applyWorkerModelsWhenReady(ctx, models) {
   ctx.workerModels = models;
-  if (!models.length) {
-    setWorkerState(ctx, 'ready');
+  if (!ctx.iframe || ctx.state !== 'ready') return;
+  const bridge = await waitForViewerBridge(ctx, ctx.iframe);
+  if (!bridge) {
+    fallbackToViewerRuntime(ctx, 'the viewer bridge disappeared');
     return;
   }
-  if (ctx.iframe && ctx.state === 'ready') {
-    const bridge = await waitForViewerBridge(ctx, ctx.iframe);
-    if (!bridge) {
-      fallbackToViewerRuntime(ctx, 'the viewer bridge disappeared');
-      return;
-    }
-    applyWorkerModels(ctx);
-  }
+  applyWorkerModels(ctx);
 }
 
 /**
@@ -1834,6 +2290,19 @@ function reload(ctx) {
  * @param {Element} wrap
  * @param {() => string} getText
  */
+function codeTools(wrap) {
+  let tools = wrap.querySelector('.yacv-code-tools');
+  if (!tools) {
+    tools = el('div', 'yacv-code-tools');
+    wrap.appendChild(tools);
+  }
+  return tools;
+}
+
+/**
+ * @param {Element} wrap
+ * @param {() => string} getText
+ */
 function addCopyButton(wrap, getText) {
   const btn = el('button', 'yacv-copy');
   btn.type = 'button';
@@ -1851,7 +2320,23 @@ function addCopyButton(wrap, getText) {
       btn.textContent = 'Copy';
     }, 1400);
   });
-  wrap.appendChild(btn);
+  codeTools(wrap).appendChild(btn);
+}
+
+/**
+ * @param {Element} wrap
+ * @param {EmbedContext} ctx
+ */
+function addEditButton(wrap, ctx) {
+  if (!ctx.editable || !ctx.hasCode) return;
+  if (wrap.querySelector('.yacv-code-edit')) return;
+  const btn = el('button', 'yacv-copy yacv-code-edit');
+  btn.type = 'button';
+  btn.textContent = 'Edit';
+  btn.title = 'Edit and run this code';
+  btn.setAttribute('aria-label', 'Edit code');
+  btn.addEventListener('click', () => void openInlineEditor(ctx));
+  codeTools(wrap).appendChild(btn);
 }
 
 /**

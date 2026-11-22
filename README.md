@@ -5,7 +5,7 @@ viewers, powered by [Yet Another CAD Viewer](https://github.com/yeicor-3d/yet-an
 Build123d runs entirely in the reader's browser (OCP compiled to WebAssembly), so there is no
 server, no Python install and no build step.
 
-```build123d height=440 title="build123d — click Run, or Open to edit" preview="assets/preview-part.glb#name=part" poster="assets/preview-part.png" auto-load=false
+```build123d height=440 title="build123d — click Run, or Edit the code" preview="assets/preview-part.glb#name=part" poster="assets/preview-part.png" auto-load=false
 from build123d import *
 
 with BuildPart() as part:
@@ -31,8 +31,11 @@ Python code block. The same Markdown works everywhere.
   vertices, face/edge/vertex selection, measurements, orthographic camera, AR and GLB export.
 - **Static GLB/GLTF** — one or more models per embed, names, and yacv hot reload
   (`dev+http://localhost:32323`) for local model development. CadQuery exports work too.
-- **Docsify-native** — the source stays in the page as a highlighted code block with a copy
-  button; the 3D view sits right below it.
+- **Docsify-native** — the source stays in the page as a highlighted code block with copy and
+  **Edit** actions; the 3D view sits right below it.
+- **Live coding, in the page** — edit Python in place or in a fullscreen split view, run it in the
+  shared worker, and keep the same viewer/camera. The editor uses Pupitre UI's code-editor design
+  and Prism Python highlighting; optional debounced auto-run. No Monaco, no external playground.
 - **Configurable sandbox** — pin build123d versions (PyPI, branch, tag, PR), debug wheels, pip
   constraints, Monaco editor, extra packages via micropip.
 - **Fast perceived startup** — pair live code with a `preview` GLB and (optionally) a `poster`
@@ -144,7 +147,7 @@ Supported languages: `build123d`, `b3d`, `b123d`, `yacv-build123d`, `yacv-py`, `
 
 Per-embed options are space separated: `height`, `title`, `version`/`b3d-version`, `debug`,
 `constraints`, `editor`, `code` (`show`/`hide`), `code-src`, `preview`, `poster`, `models`/`src`,
-`lazy`, `auto-load`, `chrome`, `open`, `viewer`, plus every yacv viewer setting (`edgeWidth=2`,
+`lazy`, `auto-load`, `chrome`, `open`, `viewer`, `editable`, `autorun`, plus every yacv viewer setting (`edgeWidth=2`,
 `autoplay=false`, ...).
 Values with spaces must be quoted: `title="My part"`.
 
@@ -238,6 +241,9 @@ window.$docsify = {
 | `lazy` | `true` | Create iframes when they approach the viewport. |
 | `preloadViewer` | `true` | Preload the viewer's main modules/styles from `viewer/manifest.json`. |
 | `prefetchModels` | `true` | Preload static GLB/GLTF bytes when the model origin differs from the viewer. |
+| `liveEdit` | `true` | Enable the in-page **Edit** action and fullscreen live editor. |
+| `autorun` | `false` | Re-run edited code automatically after a 900ms debounce. |
+| `puiCss` | hosted `vendor/pupitre-ui/pupitre-ui.css` | Pupitre UI stylesheet for the editor; `false` uses a plain textarea. |
 | `lazyMargin` | `200px` | How far before the viewport lazy embeds start loading. |
 | `maxConcurrent` | `2` | Maximum iframes created at the same time. |
 | `maxLiveConcurrent` | `2` | Maximum live build123d sandboxes loaded at once. |
@@ -249,6 +255,10 @@ window.$docsify = {
 | `openInNewTab` | `true` | Show the **Open** action (full viewer with editor). |
 | `settings` | `{}` | Extra yacv viewer settings for every embed. |
 | `base` | docs page URL | Base URL/resolver for relative assets. |
+
+The editor/fullscreen surface uses [Pupitre UI](https://codeberg.org/gllm/pupitre-ui)'s code-editor
+design and vendored stylesheet (MIT); the Python tokenizer is contributed upstream. Refresh the
+stylesheet with `npm run pui:sync`.
 
 See the [full reference](reference.md) for fence attributes, every yacv setting, behaviour,
 performance notes, styling variables, security notes and troubleshooting.
@@ -280,7 +290,8 @@ from this repository (`viewer/`):
   `scikit-learn`, `IPython`), cutting a warm live bootstrap from roughly 21–24s to ~15s
 - static/preview embeds run in mesh mode and never start Pyodide at all
 
-Use it for embeds and keep the full upstream viewer for **Open**, where the editor is available:
+Use it for embeds; **Edit** and **Fullscreen** use the in-page editor and the shared worker. The
+**Open** action still points at the full upstream viewer if you want its Monaco playground:
 
 These are the defaults, so nothing needs configuring:
 
@@ -294,7 +305,8 @@ window.$docsify = {
 ```
 
 Copy the `viewer/` directory into your static site and use `viewer: './viewer/'` for a same-origin,
-offline-capable embed. The `editor` option is ignored by the headless viewer — use **Open** to edit.
+offline-capable embed. The `editor` option is ignored by the headless viewer; use **Edit**,
+**Fullscreen**, or the separate **Open** action.
 Point `viewer` at the upstream URL if you need the in-iframe Monaco editor. See
 [`viewer/NOTICE.md`](viewer/NOTICE.md) for provenance and licensing.
 
@@ -344,9 +356,10 @@ window.$docsify = {
 - Idle workers are stopped after `workerIdleMs` (30 min default) to release memory. Use
   `DocsifyYacv.clearCache()` / `clearResultCache()` to drop the IndexedDB cache after changing the
   worker or renderer implementation.
-- CSP must allow `data:` workers (and `blob:` for the dedicated fallback), jsDelivr, and the worker
-  script origin. Otherwise use `runtime: 'viewer'` or self-host a compatible worker. Copying
-  `viewer/` + `yacv-worker.js` next to your docs gives a same-origin offline setup.
+- CSP must allow `data:` workers (and `blob:` for the dedicated fallback), jsDelivr (Pyodide,
+  Prism and the on-demand PUI stylesheet), and the worker script origin. Otherwise use
+  `runtime: 'viewer'` or self-host a compatible worker. Copying `viewer/` + `yacv-worker.js` next to
+  your docs gives a same-origin offline setup; set `puiCss: false` to avoid the hosted stylesheet.
 
 ## Time to interactive
 

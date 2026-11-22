@@ -31,6 +31,9 @@ test('resolveOptions: defaults', () => {
   assert.equal(options.workerIdleMs, 1800000);
   assert.equal(options.sharedWorker, true);
   assert.equal(options.prefetchModels, true);
+  assert.equal(options.liveEdit, true);
+  assert.equal(options.autorun, false);
+  assert.match(options.puiCss, /vendor\/pupitre-ui\/pupitre-ui\.css$/);
   assert.equal(options.unloadOffscreen, true);
   assert.equal(options.unloadMargin, '100% 0px');
   assert.equal(options.autoLoad, true);

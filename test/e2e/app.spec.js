@@ -91,6 +91,45 @@ test.describe('docsify-yacv', () => {
     await expect(page.locator('link[rel="preload"][as="fetch"]')).toHaveCount(0);
   });
 
+  test('edits and runs code inline and in the in-page fullscreen editor', async ({ page }) => {
+    await page.goto('/index-editor.html');
+    const embed = page.locator('.yacv-embed').first();
+    await expect(embed).toHaveAttribute('data-yacv-worker', 'ready');
+    const loadedNames = async () =>
+      embed.locator('iframe').evaluate(frame => frame.contentWindow.__loaded.map(item => item.name));
+    expect(await loadedNames()).toContain('part');
+
+    await page.getByRole('button', { name: 'Edit code' }).click();
+    const inline = page.locator('.yacv-inline-editor');
+    await expect(inline).toBeVisible();
+    await expect(inline.locator('.pui-code-editor')).toBeVisible();
+    await expect(inline.locator('.pui-code-gutter span').first()).toBeVisible();
+    const textarea = inline.locator('textarea');
+    await expect(textarea).toHaveValue(/show\(Box\(1, 1, 1\)\)/);
+    await textarea.fill('from build123d import *\n# Edited\nshow(Box(2, 2, 2))');
+    await inline.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(inline.locator('.yacv-editor-status')).toContainText('Model updated');
+    expect(await loadedNames()).toContain('edited');
+
+    const iframe = embed.locator('iframe');
+    const src = await iframe.getAttribute('src');
+    await embed.getByRole('button', { name: 'Fullscreen live editor' }).click();
+    await expect(embed).toHaveClass(/yacv-fullscreen/);
+    await expect(page.locator('body')).toHaveClass(/yacv-fs-open/);
+    await expect(embed.locator('.yacv-fs-pane')).toBeVisible();
+    await expect(embed.locator('.yacv-fs-editor-host .pui-code-editor')).toBeVisible();
+    expect(await iframe.getAttribute('src')).toBe(src);
+    const fsArea = embed.locator('.yacv-fs-editor-host textarea');
+    await fsArea.fill('from build123d import *\n# Edited fullscreen\nshow(Box(3, 3, 3))');
+    await embed.locator('.yacv-fs-actions').getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(embed.locator('.yacv-fs-pane .yacv-editor-status')).toContainText('Model updated');
+    expect(await loadedNames()).toContain('edited');
+
+    await page.keyboard.press('Escape');
+    await expect(embed).not.toHaveClass(/yacv-fullscreen/);
+    await expect(page.locator('body')).not.toHaveClass(/yacv-fs-open/);
+  });
+
   test('prefetches static models for a cross-origin viewer', async ({ page }) => {
     await page.goto('/index-prefetch.html');
     const embed = page.locator('.yacv-embed').first();

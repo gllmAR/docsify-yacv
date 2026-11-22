@@ -32,6 +32,7 @@ function resolvePath(urlPath) {
   if (urlPath === '/docsify.min.js') return path.join(root, 'node_modules/docsify/dist/docsify.min.js');
   if (urlPath === '/docsify-core.css') return path.join(root, 'node_modules/docsify/dist/themes/core.min.css');
   if (urlPath === '/docsify-yacv.js') return path.join(root, 'docsify-yacv.js');
+  if (urlPath === '/vendor/pupitre-ui/pupitre-ui.css') return path.join(root, 'vendor/pupitre-ui/pupitre-ui.css');
   if (urlPath === '/') return path.join(fixtures, 'index.html');
   if (urlPath === '/viewer-stub.html') return path.join(here, 'viewer-stub.html');
 

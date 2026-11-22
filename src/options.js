@@ -66,6 +66,12 @@ export const RESERVED_ATTRS = new Set([
   'src',
   'lazy',
   'autoload',
+  'editable',
+  'liveedit',
+  'editcode',
+  'autorun',
+  'runonchange',
+  'puicss',
   'chrome',
   'open',
   'viewer',
@@ -120,6 +126,16 @@ export const DEFAULT_OPTIONS = {
   workerUrl: DEFAULT_WORKER,
   /** Pre-boot the shared worker on idle when a live embed exists. */
   workerWarmup: true,
+  /** Use SharedWorker when possible (multi-tab reuse). */
+  sharedWorker: true,
+  /** Preload static GLB/GLTF bytes when the model origin differs from the viewer. */
+  prefetchModels: true,
+  /** Allow live code to be edited in the page/fullscreen. */
+  liveEdit: true,
+  /** Re-run the shared worker automatically while typing (debounced). */
+  autorun: false,
+  /** Pupitre UI stylesheet used by the code editor (empty/false = plain textarea). */
+  puiCss: 'https://gllmar.github.io/docsify-yacv/vendor/pupitre-ui/pupitre-ui.css',
   /** Cache shared-worker GLB results in IndexedDB (deterministic snippets). */
   cache: true,
   /** Terminate an idle shared worker after this many ms (`0` = never). */
@@ -187,6 +203,9 @@ export function resolveOptions(userOptions = {}, vm = null) {
   merged.workerWarmup = toBool(merged.workerWarmup, true);
   merged.sharedWorker = toBool(merged.sharedWorker, true);
   merged.prefetchModels = toBool(merged.prefetchModels, true);
+  merged.liveEdit = toBool(merged.liveEdit, true);
+  merged.autorun = toBool(merged.autorun, false);
+  merged.puiCss = merged.puiCss === false ? '' : String(merged.puiCss || '').trim();
   merged.cache = toBool(merged.cache, true);
   merged.workerIdleMs = Math.max(0, Math.floor(toNumber(merged.workerIdleMs, 1800000)));
   merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
@@ -266,6 +285,9 @@ export function normalizeEditor(value, fallback = 0) {
  * @property {boolean} [workerWarmup] Pre-boot the shared worker on idle.
  * @property {boolean} [sharedWorker] Use a SharedWorker for same-origin worker URLs.
  * @property {boolean} [prefetchModels] Preload static models for cross-origin viewers.
+ * @property {boolean} [liveEdit] Enable the in-page code editor/fullscreen live view.
+ * @property {boolean} [autorun] Re-run edited code automatically (debounced).
+ * @property {string|false} [puiCss] Pupitre UI stylesheet for the code editor.
  * @property {boolean} [cache] Cache worker GLB results in IndexedDB.
  * @property {number} [workerIdleMs] Stop an idle worker after this many ms (`0` = never).
  * @property {number} [maxConcurrent] Maximum simultaneous iframe creations.

@@ -82,6 +82,22 @@ export interface DocsifyYacvOptions {
    */
   prefetchModels?: boolean;
   /**
+   * Enable the editable code panel and the in-page fullscreen live-coding view
+   * (CodeMirror from jsDelivr, with a textarea fallback). Default: true.
+   */
+  liveEdit?: boolean;
+  /**
+   * Re-run edited code automatically after a short debounce. Default: false.
+   * Requires `liveEdit`.
+   */
+  autorun?: boolean;
+  /**
+   * Pupitre UI stylesheet used by the code editor. Default: the hosted
+   * `vendor/pupitre-ui/pupitre-ui.css`. Set `false` or `''` for a plain
+   * textarea fallback.
+   */
+  puiCss?: string | false;
+  /**
    * Cache worker GLB results in IndexedDB, keyed by code and interpreter
    * settings. Unchanged snippets render without booting Pyodide on repeat
    * visits. Default: true.

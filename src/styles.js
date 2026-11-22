@@ -277,6 +277,299 @@ export const CSS = `
 .yacv-error { color: #c0392b; }
 .yacv-error code { color: inherit; }
 
+.yacv-editor-host {
+  height: min(46vh, 380px);
+  min-height: 220px;
+}
+
+.yacv-inline-editor {
+  position: relative;
+  z-index: 1;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--yacv-border-soft);
+  background: var(--yacv-tint);
+}
+
+.yacv-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.yacv-editor-hint {
+  margin-left: auto;
+  color: inherit;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.yacv-editor-status {
+  min-height: 1.2em;
+  margin: 5px 0 0;
+  color: inherit;
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.yacv-editor-status.is-error {
+  color: #c0392b;
+  opacity: 1;
+}
+
+/* The editor itself uses the Pupitre UI code-editor pattern (textarea over a
+   highlighted layer, line gutter). The vendored PUI stylesheet is loaded on
+   demand; these rules map the PUI tokens to the docsify theme and keep the
+   editor usable if the stylesheet is blocked. */
+.yacv-editor-wrap,
+.yacv-editor-wrap > .yacv-pui-editor,
+.yacv-pui-editor .pui-code-editor {
+  height: 100%;
+  min-height: 0;
+}
+
+.yacv-embed .yacv-pui-editor.pui {
+  --pui-bg: rgba(128, 128, 128, 0.08);
+  --pui-surface: transparent;
+  --pui-surface-2: rgba(128, 128, 128, 0.16);
+  --pui-text: inherit;
+  --pui-muted: rgba(128, 128, 128, 0.95);
+  --pui-border: var(--yacv-border);
+  --pui-accent: #2f81f7;
+  --pui-success: #3fb950;
+  --pui-warning: #d29922;
+  --pui-danger: #f85149;
+  --pui-radius: 8px;
+  --pui-touch: 28px;
+  --pui-font: var(--yacv-font);
+  --pui-type-base: 13px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12.5px;
+  height: 100%;
+}
+
+.yacv-pui-editor .pui-code-editor {
+  font-family: var(--yacv-mono);
+  font-size: 12.5px;
+}
+
+.yacv-pui-editor .pui-code-highlight {
+  color: inherit;
+}
+
+.yacv-pui-editor .token.comment {
+  color: var(--pui-muted);
+  font-style: italic;
+}
+
+.yacv-pui-editor .token.keyword,
+.yacv-pui-editor .token.operator {
+  color: var(--pui-danger);
+}
+
+.yacv-pui-editor .token.string,
+.yacv-pui-editor .token.triple-quoted-string {
+  color: var(--pui-success);
+}
+
+.yacv-pui-editor .token.number {
+  color: var(--pui-warning);
+}
+
+.yacv-pui-editor .token.function,
+.yacv-pui-editor .token.class-name {
+  color: var(--pui-accent);
+}
+
+.yacv-pui-editor .token.boolean,
+.yacv-pui-editor .token.builtin {
+  color: var(--pui-danger);
+}
+
+.yacv-pui-editor .token.punctuation {
+  color: var(--pui-muted);
+}
+
+.yacv-pui-editor .token.decorator,
+.yacv-pui-editor .token.annotation {
+  color: var(--pui-warning);
+}
+
+/* Plain textarea fallback when the PUI stylesheet cannot load. */
+.yacv-pui-editor.is-unstyled .pui-code-editor.yacv-editor-textarea {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--yacv-border);
+  border-radius: 8px;
+}
+
+.yacv-editor-textarea .pui-code-gutter,
+.yacv-editor-textarea .pui-code-highlight {
+  display: none;
+}
+
+.yacv-editor-textarea .pui-code-input {
+  position: static;
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  padding: 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+  font-family: var(--yacv-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: none;
+}
+
+/* In-page fullscreen live editor: the existing embed is promoted to a fixed
+   viewport grid, so the already-loaded iframe, camera and worker stay alive. */
+body.yacv-fs-open {
+  overflow: hidden;
+}
+
+.yacv-embed.yacv-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  grid-template-columns: minmax(300px, 38%) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  width: auto;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--yacv-fullscreen-bg, #fff);
+  color: var(--yacv-fullscreen-text, #1f2328);
+}
+
+.yacv-fullscreen .yacv-toolbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  background: var(--yacv-fullscreen-surface, #fff);
+}
+
+.yacv-fullscreen .yacv-stage {
+  grid-column: 2;
+  grid-row: 2;
+  height: auto !important;
+  min-height: 0;
+}
+
+.yacv-fs-pane {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--yacv-border);
+  background: var(--yacv-fullscreen-surface, #fff);
+}
+
+.yacv-fs-pane[hidden] {
+  display: none;
+}
+
+.yacv-fullscreen.yacv-fs-no-editor {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.yacv-fullscreen.yacv-fs-no-editor .yacv-stage {
+  grid-column: 1;
+}
+
+.yacv-fs-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--yacv-border-soft);
+  font-size: 12px;
+}
+
+.yacv-fs-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.yacv-fs-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.yacv-fs-editor-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px;
+}
+
+.yacv-fs-pane > .yacv-editor-status {
+  margin: 0;
+  padding: 0 10px 8px;
+}
+
+.yacv-btn-primary {
+  border-color: var(--yacv-border);
+  background: var(--yacv-tint-strong);
+  font-weight: 600;
+}
+
+.yacv-code[data-editing="true"] > pre {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .yacv-embed.yacv-fullscreen {
+    --yacv-fullscreen-bg: #171a1f;
+    --yacv-fullscreen-surface: #1d2127;
+    --yacv-fullscreen-text: #e6edf3;
+  }
+}
+
+@media (max-width: 760px) {
+  .yacv-embed.yacv-fullscreen {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(180px, 42vh) minmax(0, 1fr);
+  }
+
+  .yacv-fullscreen .yacv-fs-pane {
+    grid-column: 1;
+    grid-row: 2;
+    border-right: 0;
+    border-bottom: 1px solid var(--yacv-border);
+  }
+
+  .yacv-fullscreen .yacv-stage {
+    background: var(--yacv-fullscreen-surface, #fff);
+  }
+
+  .yacv-fullscreen .yacv-stage {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .yacv-fullscreen.yacv-fs-no-editor .yacv-stage {
+    grid-row: 2 / -1;
+  }
+}
+
 .yacv-code {
   position: relative;
 }
@@ -294,10 +587,17 @@ export const CSS = `
   margin-block-end: 0.5em;
 }
 
-.yacv-copy {
+.yacv-code-tools {
   position: absolute;
   top: 8px;
   right: 8px;
+  z-index: 4;
+  display: flex;
+  gap: 4px;
+}
+
+.yacv-copy {
+  position: static;
   z-index: 2;
   -webkit-appearance: none;
   appearance: none;

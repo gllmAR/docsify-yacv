@@ -47,6 +47,9 @@ window.$docsify = {
 | `lazy`         | `boolean`           | `true`                                           | Create the iframe only when the embed approaches the viewport. |
 | `preloadViewer` | `boolean`          | `true`                                           | Preload viewer modules/styles from `viewer/manifest.json`. |
 | `prefetchModels` | `boolean`         | `true`                                           | Preload GLB/GLTF bytes on a different origin than the viewer. |
+| `liveEdit` | `boolean` | `true` | Enable the in-page code editor and fullscreen live view. |
+| `autorun` | `boolean` | `false` | Re-run edited code automatically (900ms debounce). |
+| `puiCss` | `string \| false` | hosted `vendor/pupitre-ui/pupitre-ui.css` | Pupitre UI stylesheet for the editor; `false` = plain textarea. |
 | `lazyMargin`   | `string \| number`  | `200px`                                          | How far before the viewport a lazy embed starts loading. |
 | `maxConcurrent` | `number`           | `2`                                              | Maximum iframes created at the same time (nearest first). |
 | `maxLiveConcurrent` | `number`        | `2`                                              | Maximum loaded live build123d sandboxes. A sandbox holds the slot until unloaded or `liveSlotMs`. |
@@ -91,6 +94,9 @@ show(Box(10, 10, 10))
 | `viewer`          |                            | Override the viewer URL for this embed. |
 | `runtime`         |                            | `viewer` or `worker` for this embed (workers are shared per settings). |
 | `cache`           |                            | `false` disables the IndexedDB result cache for this embed. |
+| `editable`        | `live-edit`, `edit-code`   | Enable/disable the in-page editor for this live embed. |
+| `autorun`         | `run-on-change`            | Re-run edited code after a 900ms pause. |
+| `pui-css`         |                            | Override the Pupitre UI stylesheet URL (or `false` for plain textarea). |
 
 Any [yacv setting](#yacv-settings) can also be used as an attribute (case-insensitive, dashes and
 underscores are ignored): `edgeWidth=2`, `autoplay=false`, `pg_opacity_loaded=0.5`, ...
@@ -220,6 +226,29 @@ npm run viewer:manifest
 
 Set `preloadViewer: false` if you do not want to preload the viewer.
 
+## Live editing and fullscreen
+
+Every live code panel gets an **Edit** action when `liveEdit` is enabled (default). The editor is a
+Pupitre UI code-editor surface: a transparent textarea over a Prism-highlighted layer, with line
+numbers and Python colors. `Ctrl/⌘+Enter` runs; **Reset** restores the original source; **Done**
+returns to the read-only view. `autorun` (global or per fence) re-runs 900ms after typing stops.
+
+The toolbar **Fullscreen** action promotes the existing embed to a fixed viewport grid — code on
+the left, the same viewer iframe on the right. The iframe is not moved or recreated, so the loaded
+model, camera and shared worker stay alive. `Escape` or **Exit** returns to the page. The fullscreen
+surface is ours; it never navigates to the external playground.
+
+```markdown
+```build123d title="Live knob" autorun
+from build123d import *
+show(Box(10, 10, 10))
+```
+```
+
+The editor is loaded on demand. The stylesheet defaults to the hosted
+`vendor/pupitre-ui/pupitre-ui.css`; set `puiCss: false` to use a plain textarea, or point `puiCss`
+at a self-hosted copy. Prism's Python grammar is loaded only if the docs theme did not provide it.
+
 ## Model prefetching
 
 When a static embed is queued, the plugin adds
@@ -271,8 +300,8 @@ Requirements and limits:
   snippets without booting Pyodide. Disable with `cache: false` for nondeterministic code;
 - idle workers are stopped after `workerIdleMs` (30 min default); use `DocsifyYacv.clearCache()`
   after changing worker/renderer behavior;
-- CSP must allow `data:` workers (and `blob:` for the fallback), jsDelivr, and the worker script
-  origin. Otherwise use
+- CSP must allow `data:` workers (and `blob:` for the fallback), jsDelivr (Pyodide, Prism and the
+  PUI stylesheet when hosted), and the worker script origin. Otherwise use
   `runtime: 'viewer'` or self-host.
 
 ## Time to interactive

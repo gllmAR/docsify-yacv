@@ -365,6 +365,16 @@ var DEFAULT_OPTIONS = {
   workerUrl: DEFAULT_WORKER,
   /** Pre-boot the shared worker on idle when a live embed exists. */
   workerWarmup: true,
+  /** Use SharedWorker when possible (multi-tab reuse). */
+  sharedWorker: true,
+  /** Preload static GLB/GLTF bytes when the model origin differs from the viewer. */
+  prefetchModels: true,
+  /** Allow live code to be edited in the page/fullscreen. */
+  liveEdit: true,
+  /** Re-run the shared worker automatically while typing (debounced). */
+  autorun: false,
+  /** Pupitre UI stylesheet used by the code editor (empty/false = plain textarea). */
+  puiCss: "https://gllmar.github.io/docsify-yacv/vendor/pupitre-ui/pupitre-ui.css",
   /** Cache shared-worker GLB results in IndexedDB (deterministic snippets). */
   cache: true,
   /** Terminate an idle shared worker after this many ms (`0` = never). */
@@ -422,6 +432,9 @@ function resolveOptions(userOptions = {}, vm = null) {
   merged.workerWarmup = toBool(merged.workerWarmup, true);
   merged.sharedWorker = toBool(merged.sharedWorker, true);
   merged.prefetchModels = toBool(merged.prefetchModels, true);
+  merged.liveEdit = toBool(merged.liveEdit, true);
+  merged.autorun = toBool(merged.autorun, false);
+  merged.puiCss = merged.puiCss === false ? "" : String(merged.puiCss || "").trim();
   merged.cache = toBool(merged.cache, true);
   merged.workerIdleMs = Math.max(0, Math.floor(toNumber(merged.workerIdleMs, 18e5)));
   merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
@@ -664,6 +677,210 @@ function prefetchModelAssets(urls, viewer, base) {
     link.addEventListener("error", () => link.remove(), { once: true });
     document.head.appendChild(link);
   }
+}
+
+// src/editor.js
+var PRISM_CORE = "https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-core.min.js";
+var PRISM_PYTHON = "https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-python.min.js";
+var styleLoads = /* @__PURE__ */ new Map();
+var prismPromise = null;
+function loadScript(src) {
+  return new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.crossOrigin = "anonymous";
+    script.addEventListener("load", () => resolve(), { once: true });
+    script.addEventListener("error", () => resolve(), { once: true });
+    document.head.appendChild(script);
+  });
+}
+function ensurePythonGrammar() {
+  if (typeof document === "undefined") return Promise.resolve();
+  if (window.Prism && window.Prism.languages && window.Prism.languages.python) return Promise.resolve();
+  if (prismPromise) return prismPromise;
+  prismPromise = (async () => {
+    if (!window.Prism) await loadScript(PRISM_CORE);
+    if (window.Prism && (!window.Prism.languages || !window.Prism.languages.python)) {
+      await loadScript(PRISM_PYTHON);
+    }
+  })().catch(() => {
+  });
+  return prismPromise;
+}
+function loadPuiStyles(href) {
+  if (typeof document === "undefined") return Promise.resolve(false);
+  if (!href) return Promise.resolve(false);
+  if (styleLoads.has(href)) return styleLoads.get(href);
+  const existing = Array.from(document.querySelectorAll("link[data-yacv-pui-css]")).find(
+    (link2) => link2.dataset.yacvPuiCss === href
+  );
+  if (existing && (existing.dataset.loaded || existing.sheet)) {
+    const result = Promise.resolve(existing.sheet ? true : existing.dataset.loaded === "1");
+    styleLoads.set(href, result);
+    return result;
+  }
+  const link = existing || document.createElement("link");
+  const promise = new Promise((resolve) => {
+    const finish = (ok) => {
+      link.dataset.loaded = ok ? "1" : "0";
+      resolve(ok);
+    };
+    if (existing) {
+      link.addEventListener("load", () => finish(true), { once: true });
+      link.addEventListener("error", () => finish(false), { once: true });
+      setTimeout(() => finish(!!link.sheet), 4e3);
+      return;
+    }
+    link.rel = "stylesheet";
+    link.href = href;
+    link.dataset.yacvPuiCss = href;
+    link.addEventListener("load", () => finish(true), { once: true });
+    link.addEventListener("error", () => finish(false), { once: true });
+    document.head.appendChild(link);
+  });
+  styleLoads.set(href, promise);
+  return promise;
+}
+function escapeHtml(code) {
+  return String(code).replace(/[&<>]/g, (ch) => ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : "&gt;");
+}
+function highlightPython2(code) {
+  const Prism = typeof window !== "undefined" ? window.Prism : void 0;
+  if (Prism && Prism.languages && Prism.languages.python && typeof Prism.highlight === "function") {
+    try {
+      return Prism.highlight(code, Prism.languages.python, "python");
+    } catch {
+    }
+  }
+  return escapeHtml(code);
+}
+function createCodeEditor(host, value, handlers = {}) {
+  const styledPromise = loadPuiStyles(handlers.puiCss || "");
+  const grammarPromise = ensurePythonGrammar();
+  host.textContent = "";
+  const label = handlers.label || "Python code";
+  const wrap = document.createElement("div");
+  wrap.className = "yacv-editor-wrap";
+  const root = document.createElement("div");
+  root.className = "pui yacv-pui-editor";
+  const surface = document.createElement("div");
+  surface.className = "pui-code-editor";
+  const gutter = document.createElement("div");
+  gutter.className = "pui-code-gutter";
+  gutter.setAttribute("aria-hidden", "true");
+  const highlight = document.createElement("pre");
+  highlight.className = "pui-code-highlight";
+  highlight.setAttribute("aria-hidden", "true");
+  const textarea = document.createElement("textarea");
+  textarea.className = "pui-code-input";
+  textarea.spellcheck = false;
+  textarea.setAttribute("aria-label", label);
+  textarea.value = value;
+  surface.append(gutter, highlight, textarea);
+  root.appendChild(surface);
+  wrap.appendChild(root);
+  host.appendChild(wrap);
+  root.classList.add("is-unstyled");
+  surface.classList.add("yacv-editor-textarea");
+  let frame = 0;
+  let silent = false;
+  const render = (next) => {
+    highlight.innerHTML = `${highlightPython2(next)}
+`;
+    const lines = next.split("\n").length;
+    gutter.textContent = "";
+    for (let i = 1; i <= lines; i += 1) {
+      const line = document.createElement("span");
+      line.textContent = String(i);
+      gutter.appendChild(line);
+    }
+    syncScroll();
+  };
+  const syncScroll = () => {
+    highlight.scrollTop = textarea.scrollTop;
+    highlight.scrollLeft = textarea.scrollLeft;
+    gutter.scrollTop = textarea.scrollTop;
+  };
+  const schedule = () => {
+    if (frame) return;
+    const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (callback) => setTimeout(callback, 16);
+    frame = raf(() => {
+      frame = 0;
+      render(textarea.value);
+    });
+  };
+  const replaceRange = (text, start, end, replacement) => {
+    const next = text.slice(0, start) + replacement + text.slice(end);
+    textarea.value = next;
+    const caret = start + replacement.length;
+    textarea.setSelectionRange(caret, caret);
+    schedule();
+    if (!silent) handlers.onChange?.(next);
+  };
+  textarea.addEventListener("input", () => {
+    render(textarea.value);
+    if (!silent) handlers.onChange?.(textarea.value);
+  });
+  textarea.addEventListener("scroll", syncScroll, { passive: true });
+  textarea.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      handlers.onRun?.();
+      return;
+    }
+    if (event.key === "Escape") {
+      handlers.onEscape?.();
+      return;
+    }
+    const text = textarea.value;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    if (event.key === "Tab") {
+      event.preventDefault();
+      if (event.shiftKey) {
+        const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+        const block = text.slice(lineStart, end);
+        const next = block.replace(/^ {1,4}/gm, "");
+        replaceRange(text, lineStart, end, next);
+        return;
+      }
+      replaceRange(text, start, end, "    ");
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+      const line = text.slice(lineStart, start);
+      const indent = (line.match(/^[ \t]*/) || [""])[0];
+      const extra = /:\s*(?:#.*)?$/.test(line) ? "    " : "";
+      replaceRange(text, start, end, `
+${indent}${extra}`);
+    }
+  });
+  render(value);
+  styledPromise.then((ok) => {
+    if (!ok) return;
+    root.classList.remove("is-unstyled");
+    surface.classList.remove("yacv-editor-textarea");
+    render(textarea.value);
+  });
+  grammarPromise.then(() => render(textarea.value));
+  return {
+    getValue: () => textarea.value,
+    setValue: (next) => {
+      silent = true;
+      textarea.value = next;
+      silent = false;
+      render(next);
+    },
+    focus: () => textarea.focus(),
+    refresh: () => {
+      render(textarea.value);
+      syncScroll();
+    },
+    destroy: () => wrap.remove()
+  };
 }
 
 // src/worker-runtime.js
@@ -1138,10 +1355,12 @@ var ICONS = {
   code: "M14.6,16.6L19.2,12L14.6,7.4L16,6L22,12L16,18L14.6,16.6M9.4,16.6L4.8,12L9.4,7.4L8,6L2,12L8,18L9.4,16.6Z",
   open: "M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z",
   play: "M8,5.14V19.14L19,12.14L8,5.14Z",
-  reload: "M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"
+  reload: "M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z",
+  fullscreen: "M5,5H10V7H7V10H5V5M14,5H19V10H17V7H14V5M5,14H7V17H10V19H5V14M17,14H19V19H14V17H17V14Z"
 };
 function mountAll(vm, options) {
   if (typeof document === "undefined") return;
+  if (fullscreenCtx && !fullscreenCtx.container.isConnected) closeFullscreen(fullscreenCtx);
   const root = document.querySelector(".markdown-section");
   if (!root) return;
   maxConcurrent = Math.max(1, Math.floor(options.maxConcurrent || 2));
@@ -1212,7 +1431,8 @@ function prepareFence(pre, vm, options) {
   );
   if (inlineCode) {
     ctx.codeWrap = wrap;
-    addCopyButton(wrap, () => code);
+    addCopyButton(wrap, () => ctx.editedCode ?? code);
+    addEditButton(wrap, ctx);
   } else {
     wrap.hidden = true;
   }
@@ -1287,6 +1507,10 @@ function createEmbed(spec, vm, options) {
   const modelCount = spec.models.length + splitList(pick(attrs, "models")).length + splitList(pick(attrs, "src")).length + splitList(pick(attrs, "preview")).length + splitList(pick(attrs, "preload")).length;
   const autoLoad = pick(attrs, "autoload") === void 0 ? options.autoLoad : toBool(pick(attrs, "autoload"), options.autoLoad);
   const cache2 = pick(attrs, "cache") === void 0 ? options.cache : toBool(pick(attrs, "cache"), options.cache);
+  const editable = pick(attrs, "editable", "liveedit", "editcode") === void 0 ? options.liveEdit !== false : toBool(pick(attrs, "editable", "liveedit", "editcode"), options.liveEdit !== false);
+  const autorun = pick(attrs, "autorun", "runonchange") === void 0 ? options.autorun === true : toBool(pick(attrs, "autorun", "runonchange"), options.autorun === true);
+  const puiCssPick = pick(attrs, "puicss");
+  const puiCss = puiCssPick === void 0 ? options.puiCss || "" : toBool(puiCssPick, true) ? stringAttr(puiCssPick) || "" : "";
   const runtimeMode = stringAttr(pick(attrs, "runtime")) || options.runtime;
   const workerUrl = stringAttr(pick(attrs, "worker", "workerurl")) || options.workerUrl;
   const sameOriginViewer = sameOrigin2(viewer);
@@ -1389,6 +1613,22 @@ function createEmbed(spec, vm, options) {
     progressStarted: 0,
     workerUnsubscribe: null,
     warmUnsubscribe: null,
+    editable,
+    autorun,
+    puiCss,
+    editedCode: spec.code && spec.code.trim() ? spec.code : null,
+    originalCode: spec.code && spec.code.trim() ? spec.code : null,
+    inlineEditor: null,
+    inlinePane: null,
+    inlineOpen: false,
+    fsEditor: null,
+    fsPane: null,
+    fsStatus: null,
+    fsBtn: null,
+    fullscreen: false,
+    runningEdit: false,
+    lastRunCode: null,
+    autorunTimer: null,
     version,
     autoLoad,
     cache: cache2,
@@ -1421,6 +1661,7 @@ function createEmbed(spec, vm, options) {
   const openAttr = pick(attrs, "open");
   if (chrome && options.openInNewTab && (openAttr === void 0 || toBool(openAttr, true))) addOpenButton(ctx);
   if (hasCode) addReloadButton(ctx);
+  addFullscreenButton(ctx);
   const hasBadge = hasCode || modelCount > 1;
   if (!chrome || !title && !hasBadge && ctx.actions.childElementCount === 0) {
     toolbar.hidden = true;
@@ -1739,13 +1980,21 @@ function removeFromQueue(ctx) {
   ctx.startPromise = null;
 }
 function ensureCode(ctx) {
-  if (ctx.inlineCode) return Promise.resolve(ctx.inlineCode);
-  if (ctx.fetchedCode != null) return Promise.resolve(ctx.fetchedCode);
+  if (ctx.editedCode != null) return Promise.resolve(ctx.editedCode);
+  if (ctx.inlineCode) {
+    ctx.originalCode = ctx.originalCode ?? ctx.inlineCode;
+    return Promise.resolve(ctx.inlineCode);
+  }
+  if (ctx.fetchedCode != null) {
+    ctx.originalCode = ctx.originalCode ?? ctx.fetchedCode;
+    return Promise.resolve(ctx.fetchedCode);
+  }
   if (!ctx.codeUrl) return Promise.resolve(null);
   if (ctx.codePromise) return ctx.codePromise;
   const resolved = resolveUrl(ctx.codeUrl, ctx.base);
   const promise = fetchCode(resolved).then((code) => {
     ctx.fetchedCode = code;
+    ctx.originalCode = ctx.originalCode ?? code;
     return code;
   });
   ctx.codePromise = promise.catch((err) => {
@@ -1969,10 +2218,332 @@ function createCodePanel(ctx, code) {
   highlightPython(codeEl, code);
   pre.appendChild(codeEl);
   wrap.appendChild(pre);
-  addCopyButton(wrap, () => code);
+  ctx.originalCode = ctx.originalCode ?? code;
+  ctx.editedCode = ctx.editedCode ?? code;
+  addCopyButton(wrap, () => ctx.editedCode ?? code);
+  addEditButton(wrap, ctx);
   ctx.container.before(wrap);
   ctx.codeWrap = wrap;
   applyCodeVisibility(ctx);
+}
+var fullscreenCtx = null;
+function updateCodeDisplay(ctx, code) {
+  if (!ctx.codeWrap) return;
+  const codeEl = ctx.codeWrap.querySelector("code");
+  if (codeEl) highlightPython(codeEl, code);
+}
+function setEditorStatus(ctx, message, error) {
+  for (const status of [ctx.inlineStatus, ctx.fsStatus]) {
+    if (!status) continue;
+    status.textContent = message || "";
+    status.classList.toggle("is-error", !!error);
+  }
+}
+function setEditedCode(ctx, code, source) {
+  ctx.editedCode = code;
+  if (ctx.originalCode == null) ctx.originalCode = code;
+  if (source !== "inline" && ctx.inlineEditor && ctx.inlineEditor.getValue() !== code) {
+    ctx.inlineEditor.setValue(code);
+  }
+  if (source !== "fullscreen" && ctx.fsEditor && ctx.fsEditor.getValue() !== code) {
+    ctx.fsEditor.setValue(code);
+  }
+  updateCodeDisplay(ctx, code);
+}
+function scheduleAutorun(ctx) {
+  if (!ctx.autorun || !ctx.editable) return;
+  if (ctx.autorunTimer) clearTimeout(ctx.autorunTimer);
+  ctx.autorunTimer = setTimeout(() => {
+    ctx.autorunTimer = null;
+    const code = ctx.editedCode;
+    if (code != null && code !== ctx.lastRunCode) void runEditedCode(ctx, code);
+  }, 900);
+}
+async function runEditedCode(ctx, code) {
+  if (code == null) return;
+  if (ctx.runningEdit) return;
+  ctx.runningEdit = true;
+  try {
+    await runEditedCodeOnce(ctx, code);
+  } finally {
+    ctx.runningEdit = false;
+    if (ctx.autorun && ctx.editedCode != null && ctx.editedCode !== ctx.lastRunCode) scheduleAutorun(ctx);
+  }
+}
+async function runEditedCodeOnce(ctx, code) {
+  if (!code.trim()) {
+    showErrorInStage(ctx, "The code editor is empty.");
+    setEditorStatus(ctx, "Code is empty.", true);
+    return;
+  }
+  if (ctx.autorunTimer) clearTimeout(ctx.autorunTimer);
+  ctx.autorunTimer = null;
+  setEditedCode(ctx, code, "run");
+  ctx.live = true;
+  ctx.lastRunCode = code;
+  setEditorStatus(ctx, "Running\u2026");
+  if (!ctx.workerMode) {
+    reload(ctx);
+    return;
+  }
+  try {
+    if (ctx.workerPromise) await ctx.workerPromise;
+    await ensureLoaded(ctx);
+    if (!ctx.workerMode) {
+      reload(ctx);
+      return;
+    }
+    if (ctx.workerPromise) {
+      await ctx.workerPromise;
+      setEditRunStatus(ctx);
+      return;
+    }
+    ctx.workerModels = null;
+    await startWorkerRun(ctx);
+    setEditRunStatus(ctx);
+  } catch (err) {
+    setEditorStatus(ctx, describeError(err), true);
+  }
+}
+function setEditRunStatus(ctx) {
+  if (ctx.container.getAttribute("data-yacv-worker") === "error") {
+    setEditorStatus(ctx, "Python failed \u2014 see the viewer for the traceback.", true);
+    return;
+  }
+  if (ctx.workerModels && ctx.workerModels.length === 0) {
+    setEditorStatus(ctx, "Ran successfully, but the code did not call show(...).");
+    return;
+  }
+  setEditorStatus(ctx, "Model updated.");
+}
+function onEditorChange(ctx, code, source) {
+  setEditedCode(ctx, code, source);
+  setEditorStatus(ctx, "");
+  scheduleAutorun(ctx);
+}
+async function openInlineEditor(ctx) {
+  if (!ctx.editable) return;
+  let code = ctx.editedCode;
+  if (code == null) {
+    try {
+      code = await ensureCode(ctx);
+    } catch (err) {
+      showErrorInStage(ctx, describeError(err));
+      return;
+    }
+  }
+  if (code == null) return;
+  if (!ctx.codeWrap) createCodePanel(ctx, code);
+  if (!ctx.codeWrap) return;
+  ctx.showCode = true;
+  applyCodeVisibility(ctx);
+  if (!ctx.inlinePane) {
+    const pane = el("div", "yacv-inline-editor");
+    const host = el("div", "yacv-editor-host");
+    const actions = el("div", "yacv-editor-actions");
+    const run = el("button", "yacv-btn yacv-btn-primary");
+    run.type = "button";
+    run.appendChild(icon(ICONS.play));
+    run.appendChild(document.createTextNode("Run"));
+    const reset = el("button", "yacv-btn");
+    reset.type = "button";
+    reset.textContent = "Reset";
+    const done = el("button", "yacv-btn");
+    done.type = "button";
+    done.textContent = "Done";
+    const hint = el("span", "yacv-editor-hint");
+    hint.textContent = ctx.autorun ? "Auto-runs on pause \xB7 Ctrl/\u2318+Enter" : "Ctrl/\u2318+Enter to run";
+    actions.append(run, reset, hint, done);
+    const status = el("p", "yacv-editor-status");
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    pane.append(host, actions, status);
+    ctx.codeWrap.appendChild(pane);
+    ctx.inlinePane = pane;
+    ctx.inlineStatus = status;
+    run.addEventListener("click", () => void runEditedCode(ctx, ctx.inlineEditor?.getValue() ?? ctx.editedCode ?? code));
+    reset.addEventListener("click", () => {
+      const original = ctx.originalCode ?? code;
+      ctx.inlineEditor?.setValue(original);
+      setEditedCode(ctx, original, "reset");
+      setEditorStatus(ctx, "Reset to the original source.");
+    });
+    done.addEventListener("click", () => closeInlineEditor(ctx));
+    ctx.inlineEditor = await createCodeEditor(host, code, {
+      puiCss: ctx.puiCss,
+      label: "build123d code",
+      onChange: (value) => onEditorChange(ctx, value, "inline"),
+      onRun: () => void runEditedCode(ctx, ctx.inlineEditor?.getValue() ?? ctx.editedCode ?? code),
+      onEscape: () => closeInlineEditor(ctx)
+    });
+  }
+  ctx.inlineOpen = true;
+  ctx.inlinePane.hidden = false;
+  const pre = ctx.codeWrap.querySelector("pre");
+  if (pre) pre.hidden = true;
+  ctx.codeWrap.dataset.editing = "true";
+  if (ctx.inlineEditor && ctx.inlineEditor.getValue() !== (ctx.editedCode ?? code)) {
+    ctx.inlineEditor.setValue(ctx.editedCode ?? code);
+  }
+  requestAnimationFrame(() => {
+    ctx.inlineEditor?.refresh();
+    ctx.inlineEditor?.focus();
+  });
+}
+function closeInlineEditor(ctx) {
+  if (!ctx.inlineOpen) return;
+  ctx.inlineOpen = false;
+  if (ctx.inlinePane) ctx.inlinePane.hidden = true;
+  if (ctx.codeWrap) {
+    const pre = ctx.codeWrap.querySelector("pre");
+    if (pre) pre.hidden = false;
+    delete ctx.codeWrap.dataset.editing;
+    updateCodeDisplay(ctx, ctx.editedCode ?? ctx.originalCode ?? "");
+  }
+  applyCodeVisibility(ctx);
+}
+function ensureFullscreenPane(ctx) {
+  if (ctx.fsPane) return ctx.fsPane;
+  const pane = el("div", "yacv-fs-pane");
+  pane.hidden = true;
+  const head = el("div", "yacv-fs-head");
+  const label = el("span", "yacv-fs-title");
+  label.textContent = "Code";
+  const badge = el("span", "yacv-badge");
+  badge.textContent = `build123d \xB7 ${ctx.version}`;
+  const actions = el("div", "yacv-fs-actions");
+  const run = el("button", "yacv-btn yacv-btn-primary");
+  run.type = "button";
+  run.appendChild(icon(ICONS.play));
+  run.appendChild(document.createTextNode("Run"));
+  const reset = el("button", "yacv-btn");
+  reset.type = "button";
+  reset.textContent = "Reset";
+  actions.append(run, reset);
+  head.append(label, badge, actions);
+  const host = el("div", "yacv-fs-editor-host");
+  const status = el("p", "yacv-editor-status");
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  pane.append(head, host, status);
+  ctx.container.insertBefore(pane, ctx.stage);
+  ctx.fsPane = pane;
+  ctx.fsStatus = status;
+  ctx.fsHost = host;
+  ctx.fsRun = run;
+  ctx.fsReset = reset;
+  run.addEventListener("click", () => void runEditedCode(ctx, ctx.fsEditor?.getValue() ?? ctx.editedCode ?? ""));
+  reset.addEventListener("click", () => {
+    const original = ctx.originalCode ?? ctx.editedCode ?? "";
+    ctx.fsEditor?.setValue(original);
+    setEditedCode(ctx, original, "reset");
+    setEditorStatus(ctx, "Reset to the original source.");
+  });
+  return pane;
+}
+async function openFullscreen(ctx) {
+  if (ctx.fullscreen) return;
+  ctx.fullscreen = true;
+  fullscreenCtx = ctx;
+  ctx.container.classList.add("yacv-fullscreen");
+  const editable = ctx.editable && ctx.hasCode;
+  ctx.container.classList.toggle("yacv-fs-no-editor", !editable);
+  ctx.container.setAttribute("role", "dialog");
+  ctx.container.setAttribute("aria-modal", "true");
+  ctx.container.setAttribute("aria-label", ctx.title || "3D model fullscreen");
+  document.body.classList.add("yacv-fs-open");
+  if (ctx.codeWrap) ctx.codeWrap.hidden = true;
+  if (ctx.codeBtn) ctx.codeBtn.hidden = true;
+  if (ctx.fsBtn) {
+    const label = ctx.fsBtn.querySelector("span");
+    if (label) label.textContent = "Exit";
+    ctx.fsBtn.title = "Exit fullscreen";
+    ctx.fsBtn.setAttribute("aria-label", "Exit fullscreen");
+  }
+  if (editable) {
+    let code = ctx.editedCode;
+    if (code == null) {
+      try {
+        code = await ensureCode(ctx);
+      } catch (err) {
+        showErrorInStage(ctx, describeError(err));
+      }
+    }
+    if (!ctx.fullscreen) return;
+    if (code == null) {
+      ctx.container.classList.add("yacv-fs-no-editor");
+    }
+    if (code != null) {
+      const pane = ensureFullscreenPane(ctx);
+      pane.hidden = false;
+      if (!ctx.fsEditor) {
+        ctx.fsEditor = await createCodeEditor(ctx.fsHost, code, {
+          puiCss: ctx.puiCss,
+          label: "build123d code",
+          onChange: (value) => onEditorChange(ctx, value, "fullscreen"),
+          onRun: () => void runEditedCode(ctx, ctx.fsEditor?.getValue() ?? ctx.editedCode ?? code),
+          onEscape: () => closeFullscreen(ctx)
+        });
+      } else if (ctx.fsEditor.getValue() !== code) {
+        ctx.fsEditor.setValue(code);
+      }
+    }
+  }
+  ctx.fsKeyHandler = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeFullscreen(ctx);
+    }
+  };
+  ctx.fsResizeHandler = () => ctx.fsEditor?.refresh();
+  document.addEventListener("keydown", ctx.fsKeyHandler);
+  window.addEventListener("resize", ctx.fsResizeHandler);
+  if (ctx.stage) void ensureLoaded(ctx);
+  requestAnimationFrame(() => {
+    ctx.fsEditor?.refresh();
+    ctx.fsEditor?.focus();
+  });
+}
+function closeFullscreen(ctx) {
+  if (!ctx.fullscreen) return;
+  ctx.fullscreen = false;
+  if (fullscreenCtx === ctx) fullscreenCtx = null;
+  ctx.container.classList.remove("yacv-fullscreen", "yacv-fs-no-editor");
+  ctx.container.removeAttribute("role");
+  ctx.container.removeAttribute("aria-modal");
+  ctx.container.removeAttribute("aria-label");
+  document.body.classList.remove("yacv-fs-open");
+  if (ctx.fsPane) ctx.fsPane.hidden = true;
+  if (ctx.codeWrap) applyCodeVisibility(ctx);
+  if (ctx.fsEditor) updateCodeDisplay(ctx, ctx.fsEditor.getValue());
+  if (ctx.fsKeyHandler) document.removeEventListener("keydown", ctx.fsKeyHandler);
+  if (ctx.fsResizeHandler) window.removeEventListener("resize", ctx.fsResizeHandler);
+  ctx.fsKeyHandler = null;
+  ctx.fsResizeHandler = null;
+  if (ctx.fsBtn) {
+    const label = ctx.fsBtn.querySelector("span");
+    if (label) label.textContent = "Fullscreen";
+    ctx.fsBtn.title = ctx.editable && ctx.hasCode ? "Fullscreen live editor" : "Fullscreen viewer";
+    ctx.fsBtn.setAttribute("aria-label", ctx.editable && ctx.hasCode ? "Fullscreen live editor" : "Fullscreen viewer");
+    ctx.fsBtn.focus();
+  }
+}
+function addFullscreenButton(ctx) {
+  if (!ctx.chrome || !ctx.actions) return;
+  const btn = el("button", "yacv-btn");
+  btn.type = "button";
+  btn.title = ctx.editable && ctx.hasCode ? "Fullscreen live editor" : "Fullscreen viewer";
+  btn.setAttribute("aria-label", btn.title);
+  btn.appendChild(icon(ICONS.fullscreen));
+  const label = el("span");
+  label.textContent = "Fullscreen";
+  btn.appendChild(label);
+  btn.addEventListener("click", () => {
+    if (ctx.fullscreen) closeFullscreen(ctx);
+    else void openFullscreen(ctx);
+  });
+  ctx.actions.appendChild(btn);
+  ctx.fsBtn = btn;
 }
 function viewerApi(iframe) {
   try {
@@ -2061,15 +2632,16 @@ function onWorkerProgress(ctx, progress) {
   showWorkerProgress(ctx, progress);
 }
 function applyWorkerModels(ctx) {
-  if (!ctx.workerMode || !ctx.workerModels || !ctx.workerModels.length) return;
+  if (!ctx.workerMode || ctx.workerModels == null) return;
   const iframe = ctx.iframe;
   if (!iframe || !iframe.contentWindow) return;
+  const models = ctx.workerModels;
   const nextNames = /* @__PURE__ */ new Set();
-  for (const model of ctx.workerModels) nextNames.add(model.name);
+  for (const model of models) nextNames.add(model.name);
   const api = ctx.sameOriginViewer ? viewerApi(iframe) : null;
   if (api) {
     const ViewerBlob = iframe.contentWindow.Blob || Blob;
-    for (const model of ctx.workerModels) {
+    for (const model of models) {
       try {
         api.loadMesh(new ViewerBlob([model.bytes], { type: "model/gltf-binary" }), model.name);
       } catch (err) {
@@ -2086,7 +2658,7 @@ function applyWorkerModels(ctx) {
     }
   } else {
     const target = viewerTargetOrigin(ctx);
-    for (const model of ctx.workerModels) {
+    for (const model of models) {
       const copy = model.bytes.slice();
       try {
         iframe.contentWindow.postMessage(
@@ -2109,6 +2681,13 @@ function applyWorkerModels(ctx) {
   }
   ctx.appliedWorkerNames = [...nextNames];
   setWorkerState(ctx, "ready");
+  if (models.length === 0) {
+    showPlaceholder(ctx, {
+      text: "No objects were shown. Call show(...) to display a model."
+    });
+    return;
+  }
+  clearPlaceholder(ctx);
   if (ctx.posterEl) ctx.posterEl.hidden = true;
 }
 async function waitForViewerBridge(ctx, iframe, timeout = 2500) {
@@ -2164,18 +2743,13 @@ async function attachWorkerModels(ctx, iframe) {
 }
 async function applyWorkerModelsWhenReady(ctx, models) {
   ctx.workerModels = models;
-  if (!models.length) {
-    setWorkerState(ctx, "ready");
+  if (!ctx.iframe || ctx.state !== "ready") return;
+  const bridge = await waitForViewerBridge(ctx, ctx.iframe);
+  if (!bridge) {
+    fallbackToViewerRuntime(ctx, "the viewer bridge disappeared");
     return;
   }
-  if (ctx.iframe && ctx.state === "ready") {
-    const bridge = await waitForViewerBridge(ctx, ctx.iframe);
-    if (!bridge) {
-      fallbackToViewerRuntime(ctx, "the viewer bridge disappeared");
-      return;
-    }
-    applyWorkerModels(ctx);
-  }
+  applyWorkerModels(ctx);
 }
 function startWorkerRun(ctx) {
   if (!ctx.workerMode || ctx.workerPromise || ctx.workerModels) return ctx.workerPromise;
@@ -2429,6 +3003,14 @@ function reload(ctx) {
   ctx.pendingUnload = false;
   enqueueLoad(ctx, true);
 }
+function codeTools(wrap) {
+  let tools = wrap.querySelector(".yacv-code-tools");
+  if (!tools) {
+    tools = el("div", "yacv-code-tools");
+    wrap.appendChild(tools);
+  }
+  return tools;
+}
 function addCopyButton(wrap, getText) {
   const btn = el("button", "yacv-copy");
   btn.type = "button";
@@ -2446,7 +3028,18 @@ function addCopyButton(wrap, getText) {
       btn.textContent = "Copy";
     }, 1400);
   });
-  wrap.appendChild(btn);
+  codeTools(wrap).appendChild(btn);
+}
+function addEditButton(wrap, ctx) {
+  if (!ctx.editable || !ctx.hasCode) return;
+  if (wrap.querySelector(".yacv-code-edit")) return;
+  const btn = el("button", "yacv-copy yacv-code-edit");
+  btn.type = "button";
+  btn.textContent = "Edit";
+  btn.title = "Edit and run this code";
+  btn.setAttribute("aria-label", "Edit code");
+  btn.addEventListener("click", () => void openInlineEditor(ctx));
+  codeTools(wrap).appendChild(btn);
 }
 function showPlaceholder(ctx, { text, spinner, error, button }) {
   clearPlaceholder(ctx);
@@ -2806,6 +3399,299 @@ var CSS = `
 .yacv-error { color: #c0392b; }
 .yacv-error code { color: inherit; }
 
+.yacv-editor-host {
+  height: min(46vh, 380px);
+  min-height: 220px;
+}
+
+.yacv-inline-editor {
+  position: relative;
+  z-index: 1;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--yacv-border-soft);
+  background: var(--yacv-tint);
+}
+
+.yacv-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.yacv-editor-hint {
+  margin-left: auto;
+  color: inherit;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.yacv-editor-status {
+  min-height: 1.2em;
+  margin: 5px 0 0;
+  color: inherit;
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.yacv-editor-status.is-error {
+  color: #c0392b;
+  opacity: 1;
+}
+
+/* The editor itself uses the Pupitre UI code-editor pattern (textarea over a
+   highlighted layer, line gutter). The vendored PUI stylesheet is loaded on
+   demand; these rules map the PUI tokens to the docsify theme and keep the
+   editor usable if the stylesheet is blocked. */
+.yacv-editor-wrap,
+.yacv-editor-wrap > .yacv-pui-editor,
+.yacv-pui-editor .pui-code-editor {
+  height: 100%;
+  min-height: 0;
+}
+
+.yacv-embed .yacv-pui-editor.pui {
+  --pui-bg: rgba(128, 128, 128, 0.08);
+  --pui-surface: transparent;
+  --pui-surface-2: rgba(128, 128, 128, 0.16);
+  --pui-text: inherit;
+  --pui-muted: rgba(128, 128, 128, 0.95);
+  --pui-border: var(--yacv-border);
+  --pui-accent: #2f81f7;
+  --pui-success: #3fb950;
+  --pui-warning: #d29922;
+  --pui-danger: #f85149;
+  --pui-radius: 8px;
+  --pui-touch: 28px;
+  --pui-font: var(--yacv-font);
+  --pui-type-base: 13px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12.5px;
+  height: 100%;
+}
+
+.yacv-pui-editor .pui-code-editor {
+  font-family: var(--yacv-mono);
+  font-size: 12.5px;
+}
+
+.yacv-pui-editor .pui-code-highlight {
+  color: inherit;
+}
+
+.yacv-pui-editor .token.comment {
+  color: var(--pui-muted);
+  font-style: italic;
+}
+
+.yacv-pui-editor .token.keyword,
+.yacv-pui-editor .token.operator {
+  color: var(--pui-danger);
+}
+
+.yacv-pui-editor .token.string,
+.yacv-pui-editor .token.triple-quoted-string {
+  color: var(--pui-success);
+}
+
+.yacv-pui-editor .token.number {
+  color: var(--pui-warning);
+}
+
+.yacv-pui-editor .token.function,
+.yacv-pui-editor .token.class-name {
+  color: var(--pui-accent);
+}
+
+.yacv-pui-editor .token.boolean,
+.yacv-pui-editor .token.builtin {
+  color: var(--pui-danger);
+}
+
+.yacv-pui-editor .token.punctuation {
+  color: var(--pui-muted);
+}
+
+.yacv-pui-editor .token.decorator,
+.yacv-pui-editor .token.annotation {
+  color: var(--pui-warning);
+}
+
+/* Plain textarea fallback when the PUI stylesheet cannot load. */
+.yacv-pui-editor.is-unstyled .pui-code-editor.yacv-editor-textarea {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--yacv-border);
+  border-radius: 8px;
+}
+
+.yacv-editor-textarea .pui-code-gutter,
+.yacv-editor-textarea .pui-code-highlight {
+  display: none;
+}
+
+.yacv-editor-textarea .pui-code-input {
+  position: static;
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  padding: 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+  font-family: var(--yacv-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: none;
+}
+
+/* In-page fullscreen live editor: the existing embed is promoted to a fixed
+   viewport grid, so the already-loaded iframe, camera and worker stay alive. */
+body.yacv-fs-open {
+  overflow: hidden;
+}
+
+.yacv-embed.yacv-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  grid-template-columns: minmax(300px, 38%) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  width: auto;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--yacv-fullscreen-bg, #fff);
+  color: var(--yacv-fullscreen-text, #1f2328);
+}
+
+.yacv-fullscreen .yacv-toolbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  background: var(--yacv-fullscreen-surface, #fff);
+}
+
+.yacv-fullscreen .yacv-stage {
+  grid-column: 2;
+  grid-row: 2;
+  height: auto !important;
+  min-height: 0;
+}
+
+.yacv-fs-pane {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--yacv-border);
+  background: var(--yacv-fullscreen-surface, #fff);
+}
+
+.yacv-fs-pane[hidden] {
+  display: none;
+}
+
+.yacv-fullscreen.yacv-fs-no-editor {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.yacv-fullscreen.yacv-fs-no-editor .yacv-stage {
+  grid-column: 1;
+}
+
+.yacv-fs-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--yacv-border-soft);
+  font-size: 12px;
+}
+
+.yacv-fs-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.yacv-fs-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.yacv-fs-editor-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px;
+}
+
+.yacv-fs-pane > .yacv-editor-status {
+  margin: 0;
+  padding: 0 10px 8px;
+}
+
+.yacv-btn-primary {
+  border-color: var(--yacv-border);
+  background: var(--yacv-tint-strong);
+  font-weight: 600;
+}
+
+.yacv-code[data-editing="true"] > pre {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .yacv-embed.yacv-fullscreen {
+    --yacv-fullscreen-bg: #171a1f;
+    --yacv-fullscreen-surface: #1d2127;
+    --yacv-fullscreen-text: #e6edf3;
+  }
+}
+
+@media (max-width: 760px) {
+  .yacv-embed.yacv-fullscreen {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(180px, 42vh) minmax(0, 1fr);
+  }
+
+  .yacv-fullscreen .yacv-fs-pane {
+    grid-column: 1;
+    grid-row: 2;
+    border-right: 0;
+    border-bottom: 1px solid var(--yacv-border);
+  }
+
+  .yacv-fullscreen .yacv-stage {
+    background: var(--yacv-fullscreen-surface, #fff);
+  }
+
+  .yacv-fullscreen .yacv-stage {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .yacv-fullscreen.yacv-fs-no-editor .yacv-stage {
+    grid-row: 2 / -1;
+  }
+}
+
 .yacv-code {
   position: relative;
 }
@@ -2823,10 +3709,17 @@ var CSS = `
   margin-block-end: 0.5em;
 }
 
-.yacv-copy {
+.yacv-code-tools {
   position: absolute;
   top: 8px;
   right: 8px;
+  z-index: 4;
+  display: flex;
+  gap: 4px;
+}
+
+.yacv-copy {
+  position: static;
   z-index: 2;
   -webkit-appearance: none;
   appearance: none;
