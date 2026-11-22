@@ -420,6 +420,7 @@ function resolveOptions(userOptions = {}, vm = null) {
   merged.runtime = merged.runtime === "worker" ? "worker" : "viewer";
   merged.workerUrl = merged.workerUrl == null ? "" : String(merged.workerUrl);
   merged.workerWarmup = toBool(merged.workerWarmup, true);
+  merged.sharedWorker = toBool(merged.sharedWorker, true);
   merged.cache = toBool(merged.cache, true);
   merged.workerIdleMs = Math.max(0, Math.floor(toNumber(merged.workerIdleMs, 18e5)));
   merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
@@ -663,10 +664,13 @@ var WorkerRuntime = class {
    * @param {string} url Worker script URL (same- or cross-origin).
    * @param {{ version: string, debug: boolean, constraints: string }} settings
    */
-  constructor(url, settings, idleMs = 0) {
+  constructor(url, settings, idleMs = 0, sharedWorker = true) {
     this.url = url;
     this.settings = { ...settings };
     this.idleMs = idleMs;
+    this.sharedWorker = sharedWorker;
+    this.shared = false;
+    this.channel = null;
     this.idleTimer = null;
     this.startupUrl = new URL("PlaygroundStartup.py", new URL(url, document.baseURI)).href;
     this.worker = null;
@@ -699,8 +703,32 @@ var WorkerRuntime = class {
     if (this.worker) this.dispose();
     const ready = (async () => {
       const scriptUrl = await workerScriptUrl(this.url);
-      const worker = new Worker(scriptUrl, { type: "module" });
+      let worker = null;
+      let channel = null;
+      let shared = false;
+      if (this.sharedWorker && sameOrigin(this.url) && typeof SharedWorker !== "undefined") {
+        try {
+          const sharedWorker = new SharedWorker(scriptUrl, {
+            type: "module",
+            // Separate shared interpreters for different build123d settings.
+            name: `docsify-yacv:${settingsKey(this.settings)}`
+          });
+          sharedWorker.port.start();
+          worker = sharedWorker;
+          channel = sharedWorker.port;
+          shared = true;
+        } catch {
+          worker = null;
+          channel = null;
+        }
+      }
+      if (!channel) {
+        worker = new Worker(scriptUrl, { type: "module" });
+        channel = worker;
+      }
       this.worker = worker;
+      this.channel = channel;
+      this.shared = shared;
       await new Promise((resolve, reject) => {
         let settled = false;
         const timer = setTimeout(() => {
@@ -710,7 +738,7 @@ var WorkerRuntime = class {
           error.phase = "boot";
           reject(error);
         }, 24e4);
-        worker.onmessage = (event) => {
+        channel.onmessage = (event) => {
           const message = event.data || {};
           if (message.type === "ready") {
             if (!settled) {
@@ -764,7 +792,7 @@ var WorkerRuntime = class {
           this.failAll(error);
           this.dispose();
         };
-        worker.postMessage({
+        channel.postMessage({
           type: "init",
           version: this.settings.version,
           debug: this.settings.debug,
@@ -799,12 +827,12 @@ var WorkerRuntime = class {
     this.clearIdle();
     const job = this.chain.then(async () => {
       await this.ensure();
-      const worker = this.worker;
-      if (!worker) throw new Error("Python worker is not available");
+      const channel = this.channel;
+      if (!channel) throw new Error("Python worker is not available");
       const id = ++this.runId;
       return new Promise((resolve, reject) => {
         this.pending.set(id, { resolve, reject });
-        worker.postMessage({ type: "run", id, code });
+        channel.postMessage({ type: "run", id, code });
       });
     });
     this.chain = job.then(
@@ -826,12 +854,18 @@ var WorkerRuntime = class {
   }
   dispose() {
     this.clearIdle();
-    if (this.worker) {
-      this.worker.onmessage = null;
+    if (this.channel && this.shared) {
+      try {
+        this.channel.close();
+      } catch {
+      }
+    } else if (this.worker) {
       this.worker.onerror = null;
       this.worker.terminate();
     }
     this.worker = null;
+    this.channel = null;
+    this.shared = false;
     this.ready = null;
     this.failAll(new Error("Python worker restarted"));
   }
@@ -840,14 +874,15 @@ var runtimes = /* @__PURE__ */ new Map();
 function settingsKey(settings) {
   return `${settings.version}|${settings.debug ? 1 : 0}|${settings.constraints}`;
 }
-function getWorkerRuntime(url, settings, idleMs = 0) {
+function getWorkerRuntime(url, settings, idleMs = 0, sharedWorker = true) {
   const key = `${url}|${settingsKey(settings)}`;
   let runtime = runtimes.get(key);
   if (!runtime) {
-    runtime = new WorkerRuntime(url, settings, idleMs);
+    runtime = new WorkerRuntime(url, settings, idleMs, sharedWorker);
     runtimes.set(key, runtime);
   } else {
     runtime.idleMs = idleMs;
+    runtime.sharedWorker = sharedWorker;
   }
   return runtime;
 }
@@ -1964,7 +1999,12 @@ function startWorkerRun(ctx) {
         }
       }
       setWorkerState(ctx, "booting");
-      const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings, ctx.options.workerIdleMs).run(code);
+      const models = await getWorkerRuntime(
+        ctx.workerUrl,
+        ctx.workerSettings,
+        ctx.options.workerIdleMs,
+        ctx.options.sharedWorker
+      ).run(code);
       if (!ctx.workerMode) return;
       if (ctx.cache) await putCachedResult(cacheInput, models);
       await applyWorkerModelsWhenReady(ctx, models);
@@ -2017,7 +2057,12 @@ function warmWorker(ctx, allowSpecial = false) {
     }
     if (warmedWorkers.has(key)) return;
     warmedWorkers.add(key);
-    getWorkerRuntime(ctx.workerUrl, ctx.workerSettings, ctx.options.workerIdleMs).ensure().catch((err) => {
+    getWorkerRuntime(
+      ctx.workerUrl,
+      ctx.workerSettings,
+      ctx.options.workerIdleMs,
+      ctx.options.sharedWorker
+    ).ensure().catch((err) => {
       setWorkerState(ctx, "error");
       console.warn("[docsify-yacv] Python worker warmup failed:", err);
     });

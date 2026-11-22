@@ -222,6 +222,7 @@ window.$docsify = {
 | `openViewer` | `https://yeicor-3d.github.io/yet-another-cad-viewer/` | Viewer used by the **Open** action (full upstream build with the editor). |
 | `runtime` | `worker` | `worker` (shared Pyodide per settings group) or `viewer` (Pyodide per embed). |
 | `workerUrl` | `https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js` | Shared worker script (cross-origin is wrapped in a Blob worker). |
+| `sharedWorker` | `true` | Use a `SharedWorker` for same-origin worker URLs (one interpreter across docs tabs). |
 | `workerWarmup` | `true` | Pre-boot the shared worker on idle when a live embed exists. |
 | `cache` | `true` | Cache worker GLBs in IndexedDB; unchanged snippets skip Pyodide on repeat visits. |
 | `workerIdleMs` | `1800000` | Stop an idle shared worker after this many ms (`0` = never). |
@@ -324,6 +325,9 @@ window.$docsify = {
   `constraints` reuse one interpreter; a different combination gets its own shared worker. The
   version/debug examples in the demo are `auto-load=false`, so their extra workers only boot on
   **Run**.
+- When the worker URL is **same-origin** (the demo and self-hosted setups), `SharedWorker` is used
+  by default: all docs tabs share the same Pyodide interpreter. Cross-origin workers fall back to a
+  per-tab Blob worker. Set `sharedWorker: false` to force per-tab workers.
 - `workerWarmup` (default `true`) pre-boots the worker on idle for auto-load live embeds; preview-only
   embeds warm shortly after their preview/poster appears (or on pointer/focus intent).
 - `maxLiveConcurrent` is bypassed in worker mode (each worker serializes its runs).

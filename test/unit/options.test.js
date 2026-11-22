@@ -29,6 +29,7 @@ test('resolveOptions: defaults', () => {
   assert.equal(options.workerWarmup, true);
   assert.equal(options.cache, true);
   assert.equal(options.workerIdleMs, 1800000);
+  assert.equal(options.sharedWorker, true);
   assert.equal(options.unloadOffscreen, true);
   assert.equal(options.unloadMargin, '100% 0px');
   assert.equal(options.autoLoad, true);

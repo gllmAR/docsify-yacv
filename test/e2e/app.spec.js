@@ -328,6 +328,26 @@ test.describe('docsify-yacv', () => {
     expect(viewerParams(opened).get('pg_opacity_loading')).toBe('0.9');
   });
 
+  test('shares one same-origin worker across tabs', async ({ page, context }) => {
+    let workerRequests = 0;
+    page.on('request', request => {
+      if (request.url().endsWith('/fake-worker.js')) workerRequests += 1;
+    });
+    await page.goto('/index-worker-shared.html');
+    await expect(page.locator('.yacv-embed')).toHaveAttribute('data-yacv-worker', 'ready');
+    await expect.poll(() => workerRequests).toBe(1);
+
+    const second = await context.newPage();
+    second.on('request', request => {
+      if (request.url().endsWith('/fake-worker.js')) workerRequests += 1;
+    });
+    await second.goto('/index-worker-shared.html');
+    await expect(second.locator('.yacv-embed')).toHaveAttribute('data-yacv-worker', 'ready');
+    const loaded = await second.locator('.yacv-embed iframe').evaluate(frame => frame.contentWindow.__loaded);
+    expect(loaded.length).toBe(1);
+    await expect.poll(() => workerRequests).toBe(1);
+  });
+
   test('terminates an idle worker and reboots it for a new snippet', async ({ page }) => {
     let workerRequests = 0;
     page.on('request', request => {

@@ -1386,7 +1386,12 @@ function startWorkerRun(ctx) {
       }
 
       setWorkerState(ctx, 'booting');
-      const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings, ctx.options.workerIdleMs).run(code);
+      const models = await getWorkerRuntime(
+        ctx.workerUrl,
+        ctx.workerSettings,
+        ctx.options.workerIdleMs,
+        ctx.options.sharedWorker,
+      ).run(code);
       if (!ctx.workerMode) return; // fell back to the viewer runtime meanwhile
       if (ctx.cache) await putCachedResult(cacheInput, models);
       await applyWorkerModelsWhenReady(ctx, models);
@@ -1460,8 +1465,12 @@ function warmWorker(ctx, allowSpecial = false) {
     }
     if (warmedWorkers.has(key)) return;
     warmedWorkers.add(key);
-    getWorkerRuntime(ctx.workerUrl, ctx.workerSettings, ctx.options.workerIdleMs)
-      .ensure()
+    getWorkerRuntime(
+        ctx.workerUrl,
+        ctx.workerSettings,
+        ctx.options.workerIdleMs,
+        ctx.options.sharedWorker,
+      ).ensure()
       .catch(err => {
         setWorkerState(ctx, 'error');
         // eslint-disable-next-line no-console

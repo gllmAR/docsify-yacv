@@ -1,15 +1,22 @@
-// Fake shared Python worker for e2e: returns one tiny fake GLB.
-self.onmessage = event => {
-  const data = event.data || {};
+// Fake worker for e2e; supports dedicated Worker and SharedWorker.
+function handle(data, reply) {
+  if (!data) return;
   if (data.type === 'init') {
-    self.postMessage({ type: 'ready' });
-    return;
-  }
-  if (data.type === 'run') {
-    self.postMessage({
+    reply({ type: 'ready' });
+  } else if (data.type === 'run') {
+    reply({
       type: 'result',
       id: data.id,
       models: [{ name: 'part', hash: 'fake', data: 'Z2xURmZha2U=' }], // "glTFfake"
     });
   }
-};
+}
+if (typeof onconnect !== 'undefined') {
+  onconnect = event => {
+    const port = event.ports[0];
+    port.onmessage = message => handle(message.data, reply => port.postMessage(reply));
+    port.start();
+  };
+} else {
+  self.onmessage = event => handle(event.data, reply => self.postMessage(reply));
+}

@@ -70,6 +70,11 @@ export interface DocsifyYacvOptions {
   /** Pre-boot the shared worker on idle when a live embed exists. Default: true. */
   workerWarmup?: boolean;
   /**
+   * Use a `SharedWorker` when the worker script is same-origin, so all docs
+   * tabs share one interpreter. Default: true (falls back to a dedicated worker).
+   */
+  sharedWorker?: boolean;
+  /**
    * Cache worker GLB results in IndexedDB, keyed by code and interpreter
    * settings. Unchanged snippets render without booting Pyodide on repeat
    * visits. Default: true.

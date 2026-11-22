@@ -33,6 +33,7 @@ window.$docsify = {
 | `openViewer`   | `string`            | `https://yeicor-3d.github.io/yet-another-cad-viewer/` | Viewer used by the **Open** action (full upstream build with the editor). |
 | `runtime`      | `'viewer' \| 'worker'` | `worker`                                     | Shared Pyodide per settings group, or Pyodide per embed. |
 | `workerUrl`    | `string`            | `https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js` | Shared worker script (cross-origin wrapped in a Blob worker). |
+| `sharedWorker` | `boolean`           | `true`                                           | Use a `SharedWorker` for same-origin workers (multi-tab reuse). |
 | `workerWarmup` | `boolean`           | `true`                                           | Pre-boot the shared worker on idle. |
 | `cache`        | `boolean`           | `true`                                           | Cache worker GLBs in IndexedDB for repeat visits. |
 | `workerIdleMs` | `number`            | `1800000`                                        | Stop an idle shared worker (`0` = never). |
@@ -240,6 +241,8 @@ Requirements and limits:
 
 - the worker script may be cross-origin: it is fetched (CORS) and wrapped in a Blob worker on the
   docs origin; Pyodide and the bootstrap are fetched from their CDNs;
+- same-origin worker URLs use a `SharedWorker` by default, so all docs tabs share one interpreter;
+  cross-origin workers use a per-tab Blob worker. Set `sharedWorker: false` to disable;
 - the viewer may be cross-origin: models are delivered via the postMessage bridge; a viewer without
   a bridge/API triggers an automatic fallback to the per-viewer runtime;
 - the worker boots once per settings group (~12–20s warm cache), then runs are ~0.5–1s;

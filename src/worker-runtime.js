@@ -69,10 +69,14 @@ export class WorkerRuntime {
    * @param {string} url Worker script URL (same- or cross-origin).
    * @param {{ version: string, debug: boolean, constraints: string }} settings
    */
-  constructor(url, settings, idleMs = 0) {
+  constructor(url, settings, idleMs = 0, sharedWorker = true) {
     this.url = url;
     this.settings = { ...settings };
     this.idleMs = idleMs;
+    this.sharedWorker = sharedWorker;
+    this.shared = false;
+    /** @type {Worker | SharedWorker | null} */
+    this.channel = null;
     /** @type {ReturnType<typeof setTimeout> | null} */
     this.idleTimer = null;
     this.startupUrl = new URL('PlaygroundStartup.py', new URL(url, document.baseURI)).href;
@@ -113,8 +117,34 @@ export class WorkerRuntime {
 
     const ready = (async () => {
       const scriptUrl = await workerScriptUrl(this.url);
-      const worker = new Worker(scriptUrl, { type: 'module' });
+      let worker = null;
+      let channel = null;
+      let shared = false;
+
+      if (this.sharedWorker && sameOrigin(this.url) && typeof SharedWorker !== 'undefined') {
+        try {
+          const sharedWorker = new SharedWorker(scriptUrl, {
+            type: 'module',
+            // Separate shared interpreters for different build123d settings.
+            name: `docsify-yacv:${settingsKey(this.settings)}`,
+          });
+          sharedWorker.port.start();
+          worker = sharedWorker;
+          channel = sharedWorker.port;
+          shared = true;
+        } catch {
+          worker = null;
+          channel = null;
+        }
+      }
+      if (!channel) {
+        worker = new Worker(scriptUrl, { type: 'module' });
+        channel = worker;
+      }
       this.worker = worker;
+      this.channel = channel;
+      this.shared = shared;
+
       await new Promise((resolve, reject) => {
         let settled = false;
         const timer = setTimeout(() => {
@@ -125,7 +155,7 @@ export class WorkerRuntime {
           reject(error);
         }, 240000);
 
-        worker.onmessage = event => {
+        channel.onmessage = event => {
           const message = event.data || {};
           if (message.type === 'ready') {
             if (!settled) {
@@ -181,7 +211,7 @@ export class WorkerRuntime {
           this.failAll(error);
           this.dispose();
         };
-        worker.postMessage({
+        channel.postMessage({
           type: 'init',
           version: this.settings.version,
           debug: this.settings.debug,
@@ -217,12 +247,12 @@ export class WorkerRuntime {
     this.clearIdle();
     const job = this.chain.then(async () => {
       await this.ensure();
-      const worker = this.worker;
-      if (!worker) throw new Error('Python worker is not available');
+      const channel = this.channel;
+      if (!channel) throw new Error('Python worker is not available');
       const id = ++this.runId;
       return new Promise((resolve, reject) => {
         this.pending.set(id, { resolve, reject });
-        worker.postMessage({ type: 'run', id, code });
+        channel.postMessage({ type: 'run', id, code });
       });
     });
     // Keep the chain alive even after a failed run.
@@ -247,12 +277,19 @@ export class WorkerRuntime {
 
   dispose() {
     this.clearIdle();
-    if (this.worker) {
-      this.worker.onmessage = null;
+    if (this.channel && this.shared) {
+      try {
+        this.channel.close();
+      } catch {
+        // ignore
+      }
+    } else if (this.worker) {
       this.worker.onerror = null;
       this.worker.terminate();
     }
     this.worker = null;
+    this.channel = null;
+    this.shared = false;
     this.ready = null;
     this.failAll(new Error('Python worker restarted'));
   }
@@ -278,14 +315,15 @@ function settingsKey(settings) {
  * @param {{ version: string, debug: boolean, constraints: string }} settings
  * @returns {WorkerRuntime}
  */
-export function getWorkerRuntime(url, settings, idleMs = 0) {
+export function getWorkerRuntime(url, settings, idleMs = 0, sharedWorker = true) {
   const key = `${url}|${settingsKey(settings)}`;
   let runtime = runtimes.get(key);
   if (!runtime) {
-    runtime = new WorkerRuntime(url, settings, idleMs);
+    runtime = new WorkerRuntime(url, settings, idleMs, sharedWorker);
     runtimes.set(key, runtime);
   } else {
     runtime.idleMs = idleMs;
+    runtime.sharedWorker = sharedWorker;
   }
   return runtime;
 }

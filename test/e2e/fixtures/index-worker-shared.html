@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>shared worker tabs e2e</title></head>
+  <body>
+    <div id="app"></div>
+    <script>
+      window.$docsify = {
+        name: 'shared worker tabs',
+        homepage: 'worker.md',
+        basePath: '/',
+        yacv: {
+          viewer: '/worker-viewer-stub.html',
+          runtime: 'worker',
+          workerUrl: '/fake-worker.js',
+          sharedWorker: true,
+          cache: false,
+          version: '0.9.1',
+          lazy: false,
+          unloadOffscreen: false,
+          workerWarmup: false,
+        },
+      };
+    </script>
+    <script src="/docsify.min.js"></script>
+    <script src="/docsify-yacv.js"></script>
+  </body>
+</html>

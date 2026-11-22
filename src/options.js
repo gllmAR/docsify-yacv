@@ -185,6 +185,7 @@ export function resolveOptions(userOptions = {}, vm = null) {
   merged.runtime = merged.runtime === 'worker' ? 'worker' : 'viewer';
   merged.workerUrl = merged.workerUrl == null ? '' : String(merged.workerUrl);
   merged.workerWarmup = toBool(merged.workerWarmup, true);
+  merged.sharedWorker = toBool(merged.sharedWorker, true);
   merged.cache = toBool(merged.cache, true);
   merged.workerIdleMs = Math.max(0, Math.floor(toNumber(merged.workerIdleMs, 1800000)));
   merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
@@ -262,6 +263,7 @@ export function normalizeEditor(value, fallback = 0) {
  * @property {'viewer' | 'worker'} [runtime] Python runtime: per-viewer or shared worker.
  * @property {string} [workerUrl] Same-origin module worker for `runtime: 'worker'`.
  * @property {boolean} [workerWarmup] Pre-boot the shared worker on idle.
+ * @property {boolean} [sharedWorker] Use a SharedWorker for same-origin worker URLs.
  * @property {boolean} [cache] Cache worker GLB results in IndexedDB.
  * @property {number} [workerIdleMs] Stop an idle worker after this many ms (`0` = never).
  * @property {number} [maxConcurrent] Maximum simultaneous iframe creations.
