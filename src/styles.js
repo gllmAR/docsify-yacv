@@ -99,6 +99,8 @@ export const CSS = `
   cursor: pointer;
 }
 
+.yacv-btn[hidden] { display: none; }
+
 .yacv-btn:hover {
   background: var(--yacv-tint-strong);
   border-color: var(--yacv-border-soft);
