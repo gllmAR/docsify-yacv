@@ -35,6 +35,7 @@ window.$docsify = {
 | `workerUrl`    | `string`            | `https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js` | Shared worker script (cross-origin wrapped in a Blob worker). |
 | `workerWarmup` | `boolean`           | `true`                                           | Pre-boot the shared worker on idle. |
 | `cache`        | `boolean`           | `true`                                           | Cache worker GLBs in IndexedDB for repeat visits. |
+| `workerIdleMs` | `number`            | `1800000`                                        | Stop an idle shared worker (`0` = never). |
 | `height`       | `number \| string`  | `480px`                                          | Default viewer height. Numbers are pixels; `auto` uses a 4:3 area. |
 | `title`        | `string`            | `''`                                             | Default toolbar title. |
 | `poster`       | `string`            | `''`                                             | Poster image for preview-only (`auto-load=false`) embeds. |
@@ -234,6 +235,8 @@ Requirements and limits:
 - `maxLiveConcurrent` is ignored in worker mode;
 - worker GLBs are cached in IndexedDB keyed by code + settings; repeat visits render unchanged
   snippets without booting Pyodide. Disable with `cache: false` for nondeterministic code;
+- idle workers are stopped after `workerIdleMs` (30 min default); use `DocsifyYacv.clearCache()`
+  after changing worker/renderer behavior;
 - CSP must allow `blob:` workers, jsDelivr, and the worker script origin. Otherwise use
   `runtime: 'viewer'` or self-host.
 

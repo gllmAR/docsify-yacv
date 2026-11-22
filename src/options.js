@@ -120,6 +120,8 @@ export const DEFAULT_OPTIONS = {
   workerWarmup: true,
   /** Cache shared-worker GLB results in IndexedDB (deterministic snippets). */
   cache: true,
+  /** Terminate an idle shared worker after this many ms (`0` = never). */
+  workerIdleMs: 1800000,
   /** Maximum number of iframes created at the same time. */
   maxConcurrent: 2,
   /**
@@ -181,6 +183,7 @@ export function resolveOptions(userOptions = {}, vm = null) {
   merged.workerUrl = merged.workerUrl == null ? '' : String(merged.workerUrl);
   merged.workerWarmup = toBool(merged.workerWarmup, true);
   merged.cache = toBool(merged.cache, true);
+  merged.workerIdleMs = Math.max(0, Math.floor(toNumber(merged.workerIdleMs, 1800000)));
   merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
   merged.maxLiveConcurrent = Math.max(1, Math.floor(toNumber(merged.maxLiveConcurrent, 2)));
   merged.liveSlotMs = Math.max(0, Math.floor(toNumber(merged.liveSlotMs, 30000)));
@@ -256,6 +259,7 @@ export function normalizeEditor(value, fallback = 0) {
  * @property {string} [workerUrl] Same-origin module worker for `runtime: 'worker'`.
  * @property {boolean} [workerWarmup] Pre-boot the shared worker on idle.
  * @property {boolean} [cache] Cache worker GLB results in IndexedDB.
+ * @property {number} [workerIdleMs] Stop an idle worker after this many ms (`0` = never).
  * @property {number} [maxConcurrent] Maximum simultaneous iframe creations.
  * @property {number} [maxLiveConcurrent] Maximum loaded live build123d sandboxes.
  * @property {number} [liveSlotMs] How long a live sandbox holds its slot (`0` = until unload).

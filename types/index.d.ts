@@ -73,6 +73,8 @@ export interface DocsifyYacvOptions {
    * visits. Default: true.
    */
   cache?: boolean;
+  /** Terminate an idle shared worker after this many ms (`0` disables). Default: 30 min. */
+  workerIdleMs?: number;
   /** Maximum number of iframes created at the same time. Default: 2. */
   maxConcurrent?: number;
   /**
@@ -117,11 +119,19 @@ export type DocsifyPlugin = (hook: any, vm: any) => void;
  */
 export declare function yacv(options?: DocsifyYacvOptions): DocsifyPlugin;
 
+/** Delete the IndexedDB worker-result cache. */
+export declare function clearResultCache(): Promise<void>;
+
+declare namespace yacv {
+  /** Delete the IndexedDB worker-result cache. */
+  function clearCache(): Promise<void>;
+}
+
 export default yacv;
 
 declare global {
   interface Window {
     /** Global exposed by the auto-registering `docsify-yacv.js` script tag. */
-    DocsifyYacv?: typeof yacv;
+    DocsifyYacv?: typeof yacv & { clearCache: typeof clearResultCache };
   }
 }

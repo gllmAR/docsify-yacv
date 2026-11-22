@@ -161,3 +161,24 @@ export async function putCachedResult(input, models) {
     // Cache failures are non-fatal.
   }
 }
+
+/**
+ * Deletes the cached results (e.g. after changing the worker/renderer output).
+ *
+ * @returns {Promise<void>}
+ */
+export function clearResultCache() {
+  if (typeof indexedDB === 'undefined') return Promise.resolve();
+  return new Promise(resolve => {
+    try {
+      const request = indexedDB.deleteDatabase(DB_NAME);
+      request.onsuccess = () => resolve();
+      request.onerror = () => resolve();
+      request.onblocked = () => resolve();
+    } catch {
+      resolve();
+    } finally {
+      dbPromise = null;
+    }
+  });
+}

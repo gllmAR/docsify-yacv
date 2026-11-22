@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>worker idle eviction e2e</title></head>
+  <body>
+    <div id="app"></div>
+    <script>
+      window.$docsify = {
+        name: 'worker idle e2e',
+        homepage: 'worker-idle.md',
+        basePath: '/',
+        yacv: {
+          viewer: '/worker-viewer-stub.html',
+          runtime: 'worker',
+          workerUrl: '/fake-worker.js',
+          version: '0.9.1',
+          lazy: false,
+          unloadOffscreen: false,
+          workerWarmup: false,
+          workerIdleMs: 250,
+        },
+      };
+    </script>
+    <script src="/docsify.min.js"></script>
+    <script src="/docsify-yacv.js"></script>
+  </body>
+</html>

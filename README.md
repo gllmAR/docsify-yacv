@@ -224,6 +224,7 @@ window.$docsify = {
 | `workerUrl` | `https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js` | Shared worker script (cross-origin is wrapped in a Blob worker). |
 | `workerWarmup` | `true` | Pre-boot the shared worker on idle when a live embed exists. |
 | `cache` | `true` | Cache worker GLBs in IndexedDB; unchanged snippets skip Pyodide on repeat visits. |
+| `workerIdleMs` | `1800000` | Stop an idle shared worker after this many ms (`0` = never). |
 | `height` | `480px` | Default stage height (number = px, CSS length, or `auto`). |
 | `title` | `''` | Default toolbar title. |
 | `poster` | `''` | Poster image for preview-only (`auto-load=false`) embeds; shown instantly. |
@@ -328,6 +329,9 @@ window.$docsify = {
 - Worker GLBs are cached in IndexedDB by code + settings. Repeat visits render unchanged
   snippets **without booting Pyodide at all**; set `cache: false` (or `cache=false` on a fence) for
   snippets whose output depends on time/randomness/files.
+- Idle workers are stopped after `workerIdleMs` (30 min default) to release memory. Use
+  `DocsifyYacv.clearCache()` / `clearResultCache()` to drop the IndexedDB cache after changing the
+  worker or renderer implementation.
 - If your CSP blocks `blob:` workers or jsDelivr, use `runtime: 'viewer'` or self-host a compatible
   worker. Copying `viewer/` + `yacv-worker.js` next to your docs gives a same-origin offline setup.
 

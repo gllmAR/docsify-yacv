@@ -1382,7 +1382,7 @@ function startWorkerRun(ctx) {
       }
 
       setWorkerState(ctx, 'booting');
-      const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).run(code);
+      const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings, ctx.options.workerIdleMs).run(code);
       if (!ctx.workerMode) return; // fell back to the viewer runtime meanwhile
       if (ctx.cache) await putCachedResult(cacheInput, models);
       await applyWorkerModelsWhenReady(ctx, models);
@@ -1456,7 +1456,7 @@ function warmWorker(ctx, allowSpecial = false) {
     }
     if (warmedWorkers.has(key)) return;
     warmedWorkers.add(key);
-    getWorkerRuntime(ctx.workerUrl, ctx.workerSettings)
+    getWorkerRuntime(ctx.workerUrl, ctx.workerSettings, ctx.options.workerIdleMs)
       .ensure()
       .catch(err => {
         setWorkerState(ctx, 'error');

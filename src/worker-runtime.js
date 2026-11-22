@@ -69,9 +69,12 @@ export class WorkerRuntime {
    * @param {string} url Worker script URL (same- or cross-origin).
    * @param {{ version: string, debug: boolean, constraints: string }} settings
    */
-  constructor(url, settings) {
+  constructor(url, settings, idleMs = 0) {
     this.url = url;
     this.settings = { ...settings };
+    this.idleMs = idleMs;
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    this.idleTimer = null;
     this.startupUrl = new URL('PlaygroundStartup.py', new URL(url, document.baseURI)).href;
     /** @type {Worker | null} */
     this.worker = null;
@@ -81,6 +84,20 @@ export class WorkerRuntime {
     /** @type {Map<number, { resolve: (models: WorkerModel[]) => void, reject: (err: Error) => void }>} */
     this.pending = new Map();
     this.chain = Promise.resolve();
+  }
+
+  clearIdle() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
+  touchIdle() {
+    this.clearIdle();
+    if (!this.idleMs || this.idleMs <= 0) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      this.dispose();
+    }, this.idleMs);
   }
 
   /**
@@ -181,6 +198,10 @@ export class WorkerRuntime {
       this.dispose();
       throw err;
     });
+    this.ready.then(
+      () => this.touchIdle(),
+      () => {},
+    );
     // Avoid unhandled rejections when nobody is waiting yet.
     this.ready.catch(() => {});
     return this.ready;
@@ -193,6 +214,7 @@ export class WorkerRuntime {
    * @returns {Promise<WorkerModel[]>}
    */
   run(code) {
+    this.clearIdle();
     const job = this.chain.then(async () => {
       await this.ensure();
       const worker = this.worker;
@@ -205,8 +227,12 @@ export class WorkerRuntime {
     });
     // Keep the chain alive even after a failed run.
     this.chain = job.then(
-      () => undefined,
-      () => undefined,
+      () => {
+        this.touchIdle();
+      },
+      () => {
+        this.touchIdle();
+      },
     );
     return job;
   }
@@ -220,6 +246,7 @@ export class WorkerRuntime {
   }
 
   dispose() {
+    this.clearIdle();
     if (this.worker) {
       this.worker.onmessage = null;
       this.worker.onerror = null;
@@ -251,12 +278,14 @@ function settingsKey(settings) {
  * @param {{ version: string, debug: boolean, constraints: string }} settings
  * @returns {WorkerRuntime}
  */
-export function getWorkerRuntime(url, settings) {
+export function getWorkerRuntime(url, settings, idleMs = 0) {
   const key = `${url}|${settingsKey(settings)}`;
   let runtime = runtimes.get(key);
   if (!runtime) {
-    runtime = new WorkerRuntime(url, settings);
+    runtime = new WorkerRuntime(url, settings, idleMs);
     runtimes.set(key, runtime);
+  } else {
+    runtime.idleMs = idleMs;
   }
   return runtime;
 }

@@ -365,6 +365,8 @@
     workerWarmup: true,
     /** Cache shared-worker GLB results in IndexedDB (deterministic snippets). */
     cache: true,
+    /** Terminate an idle shared worker after this many ms (`0` = never). */
+    workerIdleMs: 18e5,
     /** Maximum number of iframes created at the same time. */
     maxConcurrent: 2,
     /**
@@ -416,6 +418,7 @@
     merged.workerUrl = merged.workerUrl == null ? "" : String(merged.workerUrl);
     merged.workerWarmup = toBool(merged.workerWarmup, true);
     merged.cache = toBool(merged.cache, true);
+    merged.workerIdleMs = Math.max(0, Math.floor(toNumber(merged.workerIdleMs, 18e5)));
     merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
     merged.maxLiveConcurrent = Math.max(1, Math.floor(toNumber(merged.maxLiveConcurrent, 2)));
     merged.liveSlotMs = Math.max(0, Math.floor(toNumber(merged.liveSlotMs, 3e4)));
@@ -613,15 +616,29 @@
      * @param {string} url Worker script URL (same- or cross-origin).
      * @param {{ version: string, debug: boolean, constraints: string }} settings
      */
-    constructor(url, settings) {
+    constructor(url, settings, idleMs = 0) {
       this.url = url;
       this.settings = { ...settings };
+      this.idleMs = idleMs;
+      this.idleTimer = null;
       this.startupUrl = new URL("PlaygroundStartup.py", new URL(url, document.baseURI)).href;
       this.worker = null;
       this.ready = null;
       this.runId = 0;
       this.pending = /* @__PURE__ */ new Map();
       this.chain = Promise.resolve();
+    }
+    clearIdle() {
+      if (this.idleTimer) clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    touchIdle() {
+      this.clearIdle();
+      if (!this.idleMs || this.idleMs <= 0) return;
+      this.idleTimer = setTimeout(() => {
+        this.idleTimer = null;
+        this.dispose();
+      }, this.idleMs);
     }
     /**
      * Boots the worker. Rejects with `error.phase = "boot"` when the worker or
@@ -716,6 +733,11 @@
         this.dispose();
         throw err;
       });
+      this.ready.then(
+        () => this.touchIdle(),
+        () => {
+        }
+      );
       this.ready.catch(() => {
       });
       return this.ready;
@@ -727,6 +749,7 @@
      * @returns {Promise<WorkerModel[]>}
      */
     run(code) {
+      this.clearIdle();
       const job = this.chain.then(async () => {
         await this.ensure();
         const worker = this.worker;
@@ -738,8 +761,12 @@
         });
       });
       this.chain = job.then(
-        () => void 0,
-        () => void 0
+        () => {
+          this.touchIdle();
+        },
+        () => {
+          this.touchIdle();
+        }
       );
       return job;
     }
@@ -751,6 +778,7 @@
       this.pending.clear();
     }
     dispose() {
+      this.clearIdle();
       if (this.worker) {
         this.worker.onmessage = null;
         this.worker.onerror = null;
@@ -765,12 +793,14 @@
   function settingsKey(settings) {
     return `${settings.version}|${settings.debug ? 1 : 0}|${settings.constraints}`;
   }
-  function getWorkerRuntime(url, settings) {
+  function getWorkerRuntime(url, settings, idleMs = 0) {
     const key = `${url}|${settingsKey(settings)}`;
     let runtime = runtimes.get(key);
     if (!runtime) {
-      runtime = new WorkerRuntime(url, settings);
+      runtime = new WorkerRuntime(url, settings, idleMs);
       runtimes.set(key, runtime);
+    } else {
+      runtime.idleMs = idleMs;
     }
     return runtime;
   }
@@ -897,6 +927,21 @@
       });
     } catch {
     }
+  }
+  function clearResultCache() {
+    if (typeof indexedDB === "undefined") return Promise.resolve();
+    return new Promise((resolve) => {
+      try {
+        const request = indexedDB.deleteDatabase(DB_NAME);
+        request.onsuccess = () => resolve();
+        request.onerror = () => resolve();
+        request.onblocked = () => resolve();
+      } catch {
+        resolve();
+      } finally {
+        dbPromise = null;
+      }
+    });
   }
 
   // src/mount.js
@@ -1869,7 +1914,7 @@
           }
         }
         setWorkerState(ctx, "booting");
-        const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).run(code);
+        const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings, ctx.options.workerIdleMs).run(code);
         if (!ctx.workerMode) return;
         if (ctx.cache) await putCachedResult(cacheInput, models);
         await applyWorkerModelsWhenReady(ctx, models);
@@ -1922,7 +1967,7 @@
       }
       if (warmedWorkers.has(key)) return;
       warmedWorkers.add(key);
-      getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).ensure().catch((err) => {
+      getWorkerRuntime(ctx.workerUrl, ctx.workerSettings, ctx.options.workerIdleMs).ensure().catch((err) => {
         setWorkerState(ctx, "error");
         console.warn("[docsify-yacv] Python worker warmup failed:", err);
       });
@@ -2457,6 +2502,7 @@
       }
     };
   }
+  docsifyYacv.clearCache = clearResultCache;
 
   // src/iife.js
   if (typeof window !== "undefined") {

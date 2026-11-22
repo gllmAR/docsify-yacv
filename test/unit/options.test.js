@@ -28,6 +28,7 @@ test('resolveOptions: defaults', () => {
   assert.equal(options.workerUrl, DEFAULT_WORKER);
   assert.equal(options.workerWarmup, true);
   assert.equal(options.cache, true);
+  assert.equal(options.workerIdleMs, 1800000);
   assert.equal(options.unloadOffscreen, true);
   assert.equal(options.unloadMargin, '100% 0px');
   assert.equal(options.autoLoad, true);
@@ -85,6 +86,7 @@ test('resolveOptions: shared worker options', () => {
   assert.equal(options.workerWarmup, false);
   assert.equal(resolveOptions({ runtime: 'nope' }).runtime, 'viewer');
   assert.equal(resolveOptions({ cache: false }).cache, false);
+  assert.equal(resolveOptions({ workerIdleMs: -5 }).workerIdleMs, 0);
 });
 
 test('resolveOptions: marks editor as explicit only when configured', () => {

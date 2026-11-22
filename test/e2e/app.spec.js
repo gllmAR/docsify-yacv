@@ -328,6 +328,24 @@ test.describe('docsify-yacv', () => {
     expect(viewerParams(opened).get('pg_opacity_loading')).toBe('0.9');
   });
 
+  test('terminates an idle worker and reboots it for a new snippet', async ({ page }) => {
+    let workerRequests = 0;
+    page.on('request', request => {
+      if (request.url().endsWith('/fake-worker.js')) workerRequests += 1;
+    });
+    await page.goto('/index-worker-idle.html');
+    const embeds = page.locator('.yacv-embed');
+    await expect(embeds).toHaveCount(2);
+    await expect(embeds.nth(0)).toHaveAttribute('data-yacv-worker', 'ready');
+    await expect.poll(() => workerRequests).toBe(1);
+
+    // The 250ms idle timer terminates the first worker.
+    await page.waitForTimeout(700);
+    await embeds.nth(1).getByRole('button', { name: 'Load 3D viewer' }).click();
+    await expect(embeds.nth(1)).toHaveAttribute('data-yacv-worker', 'ready');
+    await expect.poll(() => workerRequests).toBe(2);
+  });
+
   test('caches worker results and skips Pyodide on reload', async ({ page }) => {
     let workerRequests = 0;
     page.on('request', request => {
