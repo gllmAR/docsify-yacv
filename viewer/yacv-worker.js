@@ -13,7 +13,8 @@
  * Protocol:
  *   in:  { type: "init", version, debug, constraints, startupUrl }
  *        { type: "run", id, code }
- *   out: { type: "ready" }
+ *   out: { type: "progress", stage, label, progress }
+ *        { type: "ready" }
  *        { type: "result", id, models: [{ name, hash, data(base64) }] }
  *        { type: "error", id?, error }
  *        { type: "boot-error", error }
@@ -29,11 +30,28 @@ let booting = null;
 let current = null;
 /** @type {Array<{ id: number, code: string, reply: (message: any) => void }>} */
 const queue = [];
+/** @type {Set<MessagePort>} */
+const ports = new Set();
+/** @type {(message: any) => void} */
+let broadcast = () => {};
+
+/**
+ * Reports coarse boot/run stages to every connected docs page. Pyodide does not
+ * expose download percentages, so these are honest milestones, not fake time.
+ *
+ * @param {string} stage
+ * @param {string} label
+ * @param {number} progress 0..1
+ */
+function report(stage, label, progress) {
+  broadcast({ type: "progress", stage, label, progress });
+}
 
 async function boot(options) {
   if (pyodide) return;
   if (booting) return booting;
   booting = (async () => {
+    report("runtime", "Starting the Python runtime…", 0.05);
     const loaded = await loadPyodide({
       indexURL: PYODIDE_INDEX,
       packages: ["micropip", "numpy", "scipy", "pillow", "requests", "packaging", "pyparsing"],
@@ -41,6 +59,7 @@ async function boot(options) {
       stdout: () => {},
       stderr: () => {},
     });
+    report("packages", "Installing build123d and the CAD kernel…", 0.35);
     loaded.globals.set("_pg_build123d_version", options.version || "stable");
     loaded.globals.set("_pg_debug", !!options.debug);
     loaded.globals.set("_pg_constraints", options.constraints || "");
@@ -53,6 +72,7 @@ async function boot(options) {
     }
     await loaded.runPythonAsync(await response.text());
     pyodide = loaded;
+    report("ready", "Python ready", 0.7);
   })();
   try {
     await booting;
@@ -68,6 +88,7 @@ async function execute(job) {
     return;
   }
   try {
+    report("code", "Running build123d…", 0.8);
     await pyodide.runPythonAsync(`
 from yacv_server import yacv
 yacv.clear()
@@ -83,6 +104,7 @@ for _docsify_key in list(globals()):
       // The startup already installed build123d/OCP; let the code report errors.
     }
     await pyodide.runPythonAsync(code);
+    report("export", "Preparing the 3D model…", 0.95);
     const payload = await pyodide.runPythonAsync(`
 import base64, json
 from yacv_server import yacv
@@ -142,19 +164,38 @@ function handleMessage(data, reply) {
 // one interpreter per docs page. A SharedWorker script must be same-origin; the
 // plugin falls back to a dedicated (Blob) worker for cross-origin worker URLs.
 if (typeof onconnect !== "undefined") {
+  broadcast = message => {
+    for (const port of ports) {
+      try {
+        port.postMessage(message);
+      } catch {
+        // The tab disconnected mid-run.
+        ports.delete(port);
+      }
+    }
+  };
   onconnect = event => {
     const port = event.ports[0];
+    ports.add(port);
     const reply = message => {
       try {
         port.postMessage(message);
       } catch {
         // The tab disconnected mid-run.
+        ports.delete(port);
       }
     };
     port.onmessage = message => handleMessage(message.data, reply);
     port.start();
   };
 } else {
+  broadcast = message => {
+    try {
+      self.postMessage(message);
+    } catch {
+      // ignore
+    }
+  };
   self.onmessage = event =>
     handleMessage(event.data, reply => {
       try {

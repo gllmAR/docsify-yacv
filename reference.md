@@ -257,6 +257,9 @@ Requirements and limits:
   so a `SharedWorker` is reused by every docs tab; same-origin scripts load directly. Pyodide and
   the bootstrap are fetched from their CDNs;
 - `sharedWorker: false` forces a per-tab dedicated (Blob) worker;
+- boot and run milestones are shown as a staged progress strip over the poster/placeholder:
+  `runtime` → `packages` → `code` → `export`, with an elapsed timer (Pyodide has no byte-level
+  progress API, so these are real milestones, not a time estimate);
 - the viewer may be cross-origin: models are delivered via the postMessage bridge; a viewer without
   a bridge/API triggers an automatic fallback to the per-viewer runtime;
 - the worker boots once per settings group (~12–20s warm cache), then runs are ~0.5–1s;

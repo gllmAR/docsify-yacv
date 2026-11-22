@@ -732,6 +732,30 @@
       this.runId = 0;
       this.pending = /* @__PURE__ */ new Map();
       this.chain = Promise.resolve();
+      this.progress = null;
+      this.progressListeners = /* @__PURE__ */ new Set();
+    }
+    /**
+     * Subscribes to future boot/run progress milestones.
+     *
+     * @param {(progress: { stage: string, label: string, progress: number }) => void} listener
+     * @returns {() => void}
+     */
+    onProgress(listener) {
+      this.progressListeners.add(listener);
+      return () => this.progressListeners.delete(listener);
+    }
+    /**
+     * @param {{ stage: string, label: string, progress: number }} progress
+     */
+    emitProgress(progress) {
+      this.progress = progress;
+      for (const listener of this.progressListeners) {
+        try {
+          listener(progress);
+        } catch {
+        }
+      }
     }
     clearIdle() {
       if (this.idleTimer) clearTimeout(this.idleTimer);
@@ -797,7 +821,16 @@
           }, 24e4);
           channel.onmessage = (event) => {
             const message = event.data || {};
+            if (message.type === "progress") {
+              this.emitProgress({
+                stage: String(message.stage || ""),
+                label: String(message.label || ""),
+                progress: Number(message.progress)
+              });
+              return;
+            }
             if (message.type === "ready") {
+              this.progress = null;
               if (!settled) {
                 settled = true;
                 clearTimeout(timer);
@@ -806,6 +839,7 @@
               return;
             }
             if (message.type === "result" || message.type === "error") {
+              this.progress = null;
               const entry = this.pending.get(message.id);
               if (!entry) return;
               this.pending.delete(message.id);
@@ -833,6 +867,7 @@
             if (message.type === "boot-error" && !settled) {
               settled = true;
               clearTimeout(timer);
+              this.progress = null;
               const error = new Error(message.error || "Python worker bootstrap failed");
               error.phase = "boot";
               reject(error);
@@ -924,6 +959,7 @@
       this.channel = null;
       this.shared = false;
       this.ready = null;
+      this.progress = null;
       this.failAll(new Error("Python worker restarted"));
     }
   };
@@ -1293,6 +1329,26 @@
     const stage = el("div", "yacv-stage");
     if (height === "auto") stage.setAttribute("data-aspect", "true");
     else stage.style.height = height;
+    const progressEl = el("div", "yacv-progress");
+    progressEl.hidden = true;
+    progressEl.setAttribute("role", "status");
+    progressEl.setAttribute("aria-live", "polite");
+    const progressRow = el("div", "yacv-progress-row");
+    const progressSpinner = el("span", "yacv-spinner");
+    progressSpinner.setAttribute("aria-hidden", "true");
+    const progressLabel = el("span", "yacv-progress-label");
+    const progressElapsed = el("span", "yacv-progress-elapsed");
+    progressElapsed.setAttribute("aria-hidden", "true");
+    progressRow.append(progressSpinner, progressLabel, progressElapsed);
+    const progressTrack = el("div", "yacv-progress-track");
+    progressTrack.setAttribute("role", "progressbar");
+    progressTrack.setAttribute("aria-valuemin", "0");
+    progressTrack.setAttribute("aria-valuemax", "100");
+    progressTrack.setAttribute("aria-label", "Python progress");
+    const progressFill = el("div", "yacv-progress-fill");
+    progressTrack.appendChild(progressFill);
+    progressEl.append(progressRow, progressTrack);
+    stage.appendChild(progressEl);
     container.appendChild(toolbar);
     container.appendChild(stage);
     const ctx = {
@@ -1324,6 +1380,15 @@
       title,
       poster,
       posterEl: null,
+      progressEl,
+      progressTrack,
+      progressFill,
+      progressLabel,
+      progressElapsed,
+      progressTicker: null,
+      progressStarted: 0,
+      workerUnsubscribe: null,
+      warmUnsubscribe: null,
       version,
       autoLoad,
       cache: cache2,
@@ -1469,6 +1534,15 @@
   }
   function unload(ctx) {
     removeFromQueue(ctx);
+    if (ctx.workerUnsubscribe) {
+      ctx.workerUnsubscribe();
+      ctx.workerUnsubscribe = null;
+    }
+    if (ctx.warmUnsubscribe) {
+      ctx.warmUnsubscribe();
+      ctx.warmUnsubscribe = null;
+    }
+    hideWorkerProgress(ctx);
     if (ctx.state === "loading") {
       ctx.pendingUnload = true;
       return;
@@ -1923,13 +1997,68 @@
       return "*";
     }
   }
-  function setWorkerState(ctx, state) {
+  function setWorkerState(ctx, state, detail) {
     if (state) ctx.container.setAttribute("data-yacv-worker", state);
     else ctx.container.removeAttribute("data-yacv-worker");
     if (ctx.workerStatus) {
       ctx.workerStatus.dataset.state = state || "";
-      ctx.workerStatus.textContent = state === "booting" ? "Booting Python\u2026" : state === "error" ? "Python failed" : "";
+      ctx.workerStatus.textContent = state === "booting" ? detail || "Booting Python\u2026" : state === "error" ? "Python failed" : "";
     }
+    if (state !== "booting") hideWorkerProgress(ctx);
+  }
+  var WORKER_STAGE_STATUS = {
+    runtime: "Starting Python\u2026",
+    packages: "Installing build123d\u2026",
+    ready: "Python ready",
+    code: "Running build123d\u2026",
+    export: "Preparing model\u2026"
+  };
+  function showWorkerProgress(ctx, progress) {
+    if (!ctx.workerMode || !ctx.progressEl) return;
+    const stage = String(progress && progress.stage || "");
+    setWorkerState(ctx, "booting");
+    const value = Number(progress && progress.progress);
+    const known = Number.isFinite(value);
+    ctx.progressEl.hidden = false;
+    if (!ctx.progressStarted) {
+      ctx.progressStarted = Date.now();
+      ctx.progressTicker = setInterval(() => updateProgressElapsed(ctx), 1e3);
+    }
+    updateProgressElapsed(ctx);
+    ctx.progressEl.dataset.stage = stage;
+    ctx.progressEl.dataset.indeterminate = known ? "false" : "true";
+    ctx.progressLabel.textContent = String(progress && progress.label || "Working\u2026");
+    if (known) {
+      const percent = Math.max(0, Math.min(100, Math.round(value * 100)));
+      ctx.progressFill.style.width = `${percent}%`;
+      ctx.progressTrack.setAttribute("aria-valuenow", String(percent));
+    } else {
+      ctx.progressFill.style.width = "35%";
+      ctx.progressTrack.removeAttribute("aria-valuenow");
+    }
+    if (ctx.workerStatus) {
+      ctx.workerStatus.textContent = WORKER_STAGE_STATUS[stage] || "Booting Python\u2026";
+    }
+  }
+  function hideWorkerProgress(ctx) {
+    if (!ctx.progressEl) return;
+    if (ctx.progressTicker) clearInterval(ctx.progressTicker);
+    ctx.progressTicker = null;
+    ctx.progressStarted = 0;
+    ctx.progressElapsed.textContent = "";
+    ctx.progressEl.hidden = true;
+    ctx.progressFill.style.width = "0%";
+    ctx.progressTrack.removeAttribute("aria-valuenow");
+    ctx.progressEl.dataset.indeterminate = "false";
+  }
+  function updateProgressElapsed(ctx) {
+    if (!ctx.progressStarted || !ctx.progressElapsed) return;
+    const seconds = Math.floor((Date.now() - ctx.progressStarted) / 1e3);
+    ctx.progressElapsed.textContent = seconds > 0 ? `${seconds}s` : "";
+  }
+  function onWorkerProgress(ctx, progress) {
+    if (!ctx.workerMode) return;
+    showWorkerProgress(ctx, progress);
   }
   function applyWorkerModels(ctx) {
     if (!ctx.workerMode || !ctx.workerModels || !ctx.workerModels.length) return;
@@ -2063,15 +2192,29 @@
           }
         }
         setWorkerState(ctx, "booting");
-        const models = await getWorkerRuntime(
+        showWorkerProgress(ctx, {
+          stage: "runtime",
+          label: "Starting the Python runtime\u2026",
+          progress: 0.05
+        });
+        const runtime = getWorkerRuntime(
           ctx.workerUrl,
           ctx.workerSettings,
           ctx.options.workerIdleMs,
           ctx.options.sharedWorker
-        ).run(code);
-        if (!ctx.workerMode) return;
-        if (ctx.cache) await putCachedResult(cacheInput, models);
-        await applyWorkerModelsWhenReady(ctx, models);
+        );
+        const unsubscribe = runtime.onProgress((progress) => onWorkerProgress(ctx, progress));
+        ctx.workerUnsubscribe = unsubscribe;
+        try {
+          const models = await runtime.run(code);
+          if (!ctx.workerMode) return;
+          if (ctx.cache) await putCachedResult(cacheInput, models);
+          await applyWorkerModelsWhenReady(ctx, models);
+        } finally {
+          unsubscribe();
+          if (ctx.workerUnsubscribe === unsubscribe) ctx.workerUnsubscribe = null;
+          hideWorkerProgress(ctx);
+        }
       } catch (err) {
         if (ctx.workerMode && err && err.phase === "boot") {
           fallbackToViewerRuntime(ctx, err);
@@ -2121,13 +2264,22 @@
       }
       if (warmedWorkers.has(key)) return;
       warmedWorkers.add(key);
-      getWorkerRuntime(
+      const runtime = getWorkerRuntime(
         ctx.workerUrl,
         ctx.workerSettings,
         ctx.options.workerIdleMs,
         ctx.options.sharedWorker
-      ).ensure().catch((err) => {
-        setWorkerState(ctx, "error");
+      );
+      const unsubscribe = runtime.onProgress((progress) => onWorkerProgress(ctx, progress));
+      ctx.warmUnsubscribe = unsubscribe;
+      runtime.ensure().then(() => {
+        unsubscribe();
+        if (ctx.warmUnsubscribe === unsubscribe) ctx.warmUnsubscribe = null;
+        if (!ctx.workerPromise) setWorkerState(ctx, "ready");
+      }).catch((err) => {
+        unsubscribe();
+        if (ctx.warmUnsubscribe === unsubscribe) ctx.warmUnsubscribe = null;
+        if (!ctx.workerPromise) setWorkerState(ctx, "error");
         console.warn("[docsify-yacv] Python worker warmup failed:", err);
       });
     };
@@ -2566,12 +2718,89 @@
   animation: yacv-spin 0.9s linear infinite;
 }
 
+/* Staged progress over the poster/placeholder: visible while the shared Python
+   worker boots or runs, so a 12-20s first example never looks stuck. */
+.yacv-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 11px 13px 12px;
+  color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0.28) 65%, transparent);
+  font-size: 12px;
+  line-height: 1.35;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.yacv-progress[hidden] { display: none; }
+
+.yacv-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.yacv-progress .yacv-spinner {
+  width: 15px;
+  height: 15px;
+  border-width: 2px;
+  border-color: rgba(255, 255, 255, 0.32);
+  border-top-color: #fff;
+}
+
+.yacv-progress-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yacv-progress-elapsed {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.yacv-progress-track {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.yacv-progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #fff;
+  transition: width 0.35s ease;
+}
+
+.yacv-progress[data-indeterminate="true"] .yacv-progress-fill {
+  animation: yacv-progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes yacv-progress-slide {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(310%); }
+}
+
 @keyframes yacv-spin {
   to { transform: rotate(360deg); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .yacv-spinner { animation-duration: 3s; }
+  .yacv-progress[data-indeterminate="true"] .yacv-progress-fill { animation: none; }
+  .yacv-progress-fill { transition: none; }
 }
 
 .yacv-error { color: #c0392b; }

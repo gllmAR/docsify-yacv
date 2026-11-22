@@ -383,6 +383,18 @@ test.describe('docsify-yacv', () => {
     await cdp.detach();
   });
 
+  test('shows staged progress while the Python worker boots', async ({ page }) => {
+    await page.goto('/index-progress.html');
+    const embed = page.locator('.yacv-embed').first();
+    const progress = embed.locator('.yacv-progress');
+    await expect(progress).toBeVisible();
+    await expect(embed.locator('.yacv-progress-label')).toContainText('Installing build123d');
+    await expect(embed.locator('.yacv-progress-track')).toHaveAttribute('aria-valuenow', '35');
+
+    await expect(embed).toHaveAttribute('data-yacv-worker', 'ready');
+    await expect(progress).toBeHidden();
+  });
+
   test('terminates an idle worker and reboots it for a new snippet', async ({ page }) => {
     let workerRequests = 0;
     page.on('request', request => {

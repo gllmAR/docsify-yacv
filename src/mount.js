@@ -323,6 +323,27 @@ function createEmbed(spec, vm, options) {
   if (height === 'auto') stage.setAttribute('data-aspect', 'true');
   else stage.style.height = height;
 
+  const progressEl = el('div', 'yacv-progress');
+  progressEl.hidden = true;
+  progressEl.setAttribute('role', 'status');
+  progressEl.setAttribute('aria-live', 'polite');
+  const progressRow = el('div', 'yacv-progress-row');
+  const progressSpinner = el('span', 'yacv-spinner');
+  progressSpinner.setAttribute('aria-hidden', 'true');
+  const progressLabel = el('span', 'yacv-progress-label');
+  const progressElapsed = el('span', 'yacv-progress-elapsed');
+  progressElapsed.setAttribute('aria-hidden', 'true');
+  progressRow.append(progressSpinner, progressLabel, progressElapsed);
+  const progressTrack = el('div', 'yacv-progress-track');
+  progressTrack.setAttribute('role', 'progressbar');
+  progressTrack.setAttribute('aria-valuemin', '0');
+  progressTrack.setAttribute('aria-valuemax', '100');
+  progressTrack.setAttribute('aria-label', 'Python progress');
+  const progressFill = el('div', 'yacv-progress-fill');
+  progressTrack.appendChild(progressFill);
+  progressEl.append(progressRow, progressTrack);
+  stage.appendChild(progressEl);
+
   container.appendChild(toolbar);
   container.appendChild(stage);
 
@@ -356,6 +377,15 @@ function createEmbed(spec, vm, options) {
     title,
     poster,
     posterEl: null,
+    progressEl,
+    progressTrack,
+    progressFill,
+    progressLabel,
+    progressElapsed,
+    progressTicker: null,
+    progressStarted: 0,
+    workerUnsubscribe: null,
+    warmUnsubscribe: null,
     version,
     autoLoad,
     cache,
@@ -577,6 +607,15 @@ function observeUnload(ctx) {
  */
 function unload(ctx) {
   removeFromQueue(ctx);
+  if (ctx.workerUnsubscribe) {
+    ctx.workerUnsubscribe();
+    ctx.workerUnsubscribe = null;
+  }
+  if (ctx.warmUnsubscribe) {
+    ctx.warmUnsubscribe();
+    ctx.warmUnsubscribe = null;
+  }
+  hideWorkerProgress(ctx);
 
   if (ctx.state === 'loading') {
     // `load()` is still building the URL; unload as soon as the iframe settles.
@@ -1202,15 +1241,98 @@ function viewerTargetOrigin(ctx) {
 /**
  * @param {EmbedContext} ctx
  * @param {'booting' | 'ready' | 'error' | null} state
+ * @param {string} [detail] Short status shown in the toolbar while booting.
  */
-function setWorkerState(ctx, state) {
+function setWorkerState(ctx, state, detail) {
   if (state) ctx.container.setAttribute('data-yacv-worker', state);
   else ctx.container.removeAttribute('data-yacv-worker');
   if (ctx.workerStatus) {
     ctx.workerStatus.dataset.state = state || '';
     ctx.workerStatus.textContent =
-      state === 'booting' ? 'Booting Python…' : state === 'error' ? 'Python failed' : '';
+      state === 'booting'
+        ? detail || 'Booting Python…'
+        : state === 'error'
+          ? 'Python failed'
+          : '';
   }
+  if (state !== 'booting') hideWorkerProgress(ctx);
+}
+
+const WORKER_STAGE_STATUS = {
+  runtime: 'Starting Python…',
+  packages: 'Installing build123d…',
+  ready: 'Python ready',
+  code: 'Running build123d…',
+  export: 'Preparing model…',
+};
+
+/**
+ * Shows a staged progress strip over the poster/placeholder/viewer. The bar is
+ * milestone-based (Pyodide has no byte-level progress API) with a spinner for
+ * the long package-install phase.
+ *
+ * @param {EmbedContext} ctx
+ * @param {{ stage?: string, label?: string, progress?: number }} progress
+ */
+function showWorkerProgress(ctx, progress) {
+  if (!ctx.workerMode || !ctx.progressEl) return;
+  const stage = String((progress && progress.stage) || '');
+  setWorkerState(ctx, 'booting');
+  const value = Number(progress && progress.progress);
+  const known = Number.isFinite(value);
+  ctx.progressEl.hidden = false;
+  if (!ctx.progressStarted) {
+    ctx.progressStarted = Date.now();
+    ctx.progressTicker = setInterval(() => updateProgressElapsed(ctx), 1000);
+  }
+  updateProgressElapsed(ctx);
+  ctx.progressEl.dataset.stage = stage;
+  ctx.progressEl.dataset.indeterminate = known ? 'false' : 'true';
+  ctx.progressLabel.textContent = String((progress && progress.label) || 'Working…');
+  if (known) {
+    const percent = Math.max(0, Math.min(100, Math.round(value * 100)));
+    ctx.progressFill.style.width = `${percent}%`;
+    ctx.progressTrack.setAttribute('aria-valuenow', String(percent));
+  } else {
+    ctx.progressFill.style.width = '35%';
+    ctx.progressTrack.removeAttribute('aria-valuenow');
+  }
+  if (ctx.workerStatus) {
+    ctx.workerStatus.textContent = WORKER_STAGE_STATUS[stage] || 'Booting Python…';
+  }
+}
+
+/**
+ * @param {EmbedContext} ctx
+ */
+function hideWorkerProgress(ctx) {
+  if (!ctx.progressEl) return;
+  if (ctx.progressTicker) clearInterval(ctx.progressTicker);
+  ctx.progressTicker = null;
+  ctx.progressStarted = 0;
+  ctx.progressElapsed.textContent = '';
+  ctx.progressEl.hidden = true;
+  ctx.progressFill.style.width = '0%';
+  ctx.progressTrack.removeAttribute('aria-valuenow');
+  ctx.progressEl.dataset.indeterminate = 'false';
+}
+
+/**
+ * @param {EmbedContext} ctx
+ */
+function updateProgressElapsed(ctx) {
+  if (!ctx.progressStarted || !ctx.progressElapsed) return;
+  const seconds = Math.floor((Date.now() - ctx.progressStarted) / 1000);
+  ctx.progressElapsed.textContent = seconds > 0 ? `${seconds}s` : '';
+}
+
+/**
+ * @param {EmbedContext} ctx
+ * @param {{ stage?: string, label?: string, progress?: number }} progress
+ */
+function onWorkerProgress(ctx, progress) {
+  if (!ctx.workerMode) return;
+  showWorkerProgress(ctx, progress);
 }
 
 /**
@@ -1403,15 +1525,29 @@ function startWorkerRun(ctx) {
       }
 
       setWorkerState(ctx, 'booting');
-      const models = await getWorkerRuntime(
+      showWorkerProgress(ctx, {
+        stage: 'runtime',
+        label: 'Starting the Python runtime…',
+        progress: 0.05,
+      });
+      const runtime = getWorkerRuntime(
         ctx.workerUrl,
         ctx.workerSettings,
         ctx.options.workerIdleMs,
         ctx.options.sharedWorker,
-      ).run(code);
-      if (!ctx.workerMode) return; // fell back to the viewer runtime meanwhile
-      if (ctx.cache) await putCachedResult(cacheInput, models);
-      await applyWorkerModelsWhenReady(ctx, models);
+      );
+      const unsubscribe = runtime.onProgress(progress => onWorkerProgress(ctx, progress));
+      ctx.workerUnsubscribe = unsubscribe;
+      try {
+        const models = await runtime.run(code);
+        if (!ctx.workerMode) return; // fell back to the viewer runtime meanwhile
+        if (ctx.cache) await putCachedResult(cacheInput, models);
+        await applyWorkerModelsWhenReady(ctx, models);
+      } finally {
+        unsubscribe();
+        if (ctx.workerUnsubscribe === unsubscribe) ctx.workerUnsubscribe = null;
+        hideWorkerProgress(ctx);
+      }
     } catch (err) {
       if (ctx.workerMode && err && err.phase === 'boot') {
         fallbackToViewerRuntime(ctx, err);
@@ -1482,14 +1618,25 @@ function warmWorker(ctx, allowSpecial = false) {
     }
     if (warmedWorkers.has(key)) return;
     warmedWorkers.add(key);
-    getWorkerRuntime(
-        ctx.workerUrl,
-        ctx.workerSettings,
-        ctx.options.workerIdleMs,
-        ctx.options.sharedWorker,
-      ).ensure()
+    const runtime = getWorkerRuntime(
+      ctx.workerUrl,
+      ctx.workerSettings,
+      ctx.options.workerIdleMs,
+      ctx.options.sharedWorker,
+    );
+    const unsubscribe = runtime.onProgress(progress => onWorkerProgress(ctx, progress));
+    ctx.warmUnsubscribe = unsubscribe;
+    runtime
+      .ensure()
+      .then(() => {
+        unsubscribe();
+        if (ctx.warmUnsubscribe === unsubscribe) ctx.warmUnsubscribe = null;
+        if (!ctx.workerPromise) setWorkerState(ctx, 'ready');
+      })
       .catch(err => {
-        setWorkerState(ctx, 'error');
+        unsubscribe();
+        if (ctx.warmUnsubscribe === unsubscribe) ctx.warmUnsubscribe = null;
+        if (!ctx.workerPromise) setWorkerState(ctx, 'error');
         // eslint-disable-next-line no-console
         console.warn('[docsify-yacv] Python worker warmup failed:', err);
       });

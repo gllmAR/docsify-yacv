@@ -46,7 +46,8 @@ Python code block. The same Markdown works everywhere.
   Pyodide instance. First boot ~12–20s, then each example renders in well under a second and the
   preview/poster stays visible. No self-hosting is required: the worker is fetched (CORS) from the
   hosted viewer and run from a stable `data:` SharedWorker, so all docs tabs share one interpreter
-  (a dedicated Blob worker is the fallback).
+  (a dedicated Blob worker is the fallback). A staged progress strip shows the current phase and
+  elapsed time during the first boot.
 - **No build, static hosting** — the plugin is a single root-level `docsify-yacv.js`, committed and
   served as-is. The repository root is the docsify demo.
 
@@ -317,12 +318,16 @@ window.$docsify = {
 ```
 
 - **No self-hosting needed.** The plugin fetches the worker script (GitHub Pages allows CORS) and
-  runs it from a Blob worker on your origin. A cross-origin viewer receives GLBs through a
+  runs it from a stable `data:` SharedWorker. A cross-origin viewer receives GLBs through a
   `postMessage` bridge in `viewer/index.html`; a same-origin viewer uses its direct API.
 - **Fallback:** if the worker cannot start (CSP, network) or the viewer has no bridge/API, the embed
   automatically reloads with the per-viewer runtime.
 - First run bootstraps Pyodide (~12–20s warm cache); later runs with the same settings take
   **~0.5–1s**. Static/preview embeds never boot Python.
+- While the worker boots or runs, the embed shows a staged progress strip — *Starting the Python
+  runtime…*, *Installing build123d and the CAD kernel…*, *Running build123d…*, *Preparing the 3D
+  model…* — with an elapsed timer. The poster/preview stays visible underneath, so the first
+  12–20s never looks frozen.
 - Workers are shared **per settings combination**: embeds with the same `version`, `debug` and
   `constraints` reuse one interpreter; a different combination gets its own shared worker. The
   version/debug examples in the demo are `auto-load=false`, so their extra workers only boot on

@@ -189,12 +189,89 @@ export const CSS = `
   animation: yacv-spin 0.9s linear infinite;
 }
 
+/* Staged progress over the poster/placeholder: visible while the shared Python
+   worker boots or runs, so a 12-20s first example never looks stuck. */
+.yacv-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 11px 13px 12px;
+  color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0.28) 65%, transparent);
+  font-size: 12px;
+  line-height: 1.35;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.yacv-progress[hidden] { display: none; }
+
+.yacv-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.yacv-progress .yacv-spinner {
+  width: 15px;
+  height: 15px;
+  border-width: 2px;
+  border-color: rgba(255, 255, 255, 0.32);
+  border-top-color: #fff;
+}
+
+.yacv-progress-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yacv-progress-elapsed {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.yacv-progress-track {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.yacv-progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #fff;
+  transition: width 0.35s ease;
+}
+
+.yacv-progress[data-indeterminate="true"] .yacv-progress-fill {
+  animation: yacv-progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes yacv-progress-slide {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(310%); }
+}
+
 @keyframes yacv-spin {
   to { transform: rotate(360deg); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .yacv-spinner { animation-duration: 3s; }
+  .yacv-progress[data-indeterminate="true"] .yacv-progress-fill { animation: none; }
+  .yacv-progress-fill { transition: none; }
 }
 
 .yacv-error { color: #c0392b; }

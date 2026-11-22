@@ -116,6 +116,35 @@ export class WorkerRuntime {
     /** @type {Map<number, { resolve: (models: WorkerModel[]) => void, reject: (err: Error) => void }>} */
     this.pending = new Map();
     this.chain = Promise.resolve();
+    /** @type {{ stage: string, label: string, progress: number } | null} */
+    this.progress = null;
+    /** @type {Set<(progress: { stage: string, label: string, progress: number }) => void>} */
+    this.progressListeners = new Set();
+  }
+
+  /**
+   * Subscribes to future boot/run progress milestones.
+   *
+   * @param {(progress: { stage: string, label: string, progress: number }) => void} listener
+   * @returns {() => void}
+   */
+  onProgress(listener) {
+    this.progressListeners.add(listener);
+    return () => this.progressListeners.delete(listener);
+  }
+
+  /**
+   * @param {{ stage: string, label: string, progress: number }} progress
+   */
+  emitProgress(progress) {
+    this.progress = progress;
+    for (const listener of this.progressListeners) {
+      try {
+        listener(progress);
+      } catch {
+        // ignore UI errors
+      }
+    }
   }
 
   clearIdle() {
@@ -188,7 +217,16 @@ export class WorkerRuntime {
 
         channel.onmessage = event => {
           const message = event.data || {};
+          if (message.type === 'progress') {
+            this.emitProgress({
+              stage: String(message.stage || ''),
+              label: String(message.label || ''),
+              progress: Number(message.progress),
+            });
+            return;
+          }
           if (message.type === 'ready') {
+            this.progress = null;
             if (!settled) {
               settled = true;
               clearTimeout(timer);
@@ -197,6 +235,7 @@ export class WorkerRuntime {
             return;
           }
           if (message.type === 'result' || message.type === 'error') {
+            this.progress = null;
             const entry = this.pending.get(message.id);
             if (!entry) return;
             this.pending.delete(message.id);
@@ -226,6 +265,7 @@ export class WorkerRuntime {
           if (message.type === 'boot-error' && !settled) {
             settled = true;
             clearTimeout(timer);
+            this.progress = null;
             const error = new Error(message.error || 'Python worker bootstrap failed');
             error.phase = 'boot';
             reject(error);
@@ -322,6 +362,7 @@ export class WorkerRuntime {
     this.channel = null;
     this.shared = false;
     this.ready = null;
+    this.progress = null;
     this.failAll(new Error('Python worker restarted'));
   }
 }

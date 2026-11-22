@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>progress e2e</title></head>
+  <body>
+    <div id="app"></div>
+    <script>
+      window.$docsify = {
+        name: 'progress',
+        homepage: 'progress.md',
+        basePath: '/',
+        yacv: {
+          viewer: '/worker-viewer-stub.html',
+          runtime: 'worker',
+          workerUrl: '/progress-worker.js',
+          sharedWorker: false,
+          cache: false,
+          version: '0.9.1',
+          lazy: false,
+          unloadOffscreen: false,
+          workerWarmup: false,
+        },
+      };
+    </script>
+    <script src="/docsify.min.js"></script>
+    <script src="/docsify-yacv.js"></script>
+  </body>
+</html>
