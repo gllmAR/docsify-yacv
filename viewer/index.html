@@ -6,6 +6,16 @@
     <title>Yet Another CAD Viewer</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
+    // Let docsify-yacv close its fullscreen live editor when Escape is pressed
+    // while focus is inside this iframe (key events do not bubble across the
+    // document boundary).
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        try {
+          window.parent.postMessage({ type: "yacv:escape" }, "*");
+        } catch (_) {}
+      }
+    });
     window.__b3dLiveHost = true;
     window.__b3dLiveMode = new URLSearchParams(location.hash.slice(1)).has("pg_code") ? "python" : "mesh";
 

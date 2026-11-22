@@ -1621,6 +1621,7 @@ ${indent}${extra}`);
       inlineEditor: null,
       inlinePane: null,
       inlineOpen: false,
+      editRunButtons: [],
       fsEditor: null,
       fsPane: null,
       fsStatus: null,
@@ -2167,6 +2168,18 @@ ${indent}${extra}`);
     const label = el("span");
     btn.appendChild(label);
     btn.addEventListener("click", async () => {
+      if (ctx.fullscreen) {
+        if (!ctx.fsPane) return;
+        const show = ctx.fsPane.hidden;
+        ctx.fsPane.hidden = !show;
+        ctx.container.classList.toggle("yacv-fs-no-editor", !show);
+        const fullLabel = btn.querySelector("span");
+        if (fullLabel) fullLabel.textContent = show ? "Hide code" : "Show code";
+        btn.title = show ? "Hide the fullscreen code editor" : "Show the fullscreen code editor";
+        btn.setAttribute("aria-label", show ? "Hide code" : "Show code");
+        if (show) requestAnimationFrame(() => ctx.fsEditor?.refresh());
+        return;
+      }
       const visible = ctx.showCode && !!ctx.codeWrap;
       if (visible) {
         ctx.showCode = false;
@@ -2259,14 +2272,21 @@ ${indent}${extra}`);
       if (code != null && code !== ctx.lastRunCode) void runEditedCode(ctx, code);
     }, 900);
   }
+  function setEditRunning(ctx, running) {
+    ctx.runningEdit = running;
+    for (const button of ctx.editRunButtons) {
+      button.disabled = running;
+      button.setAttribute("aria-busy", running ? "true" : "false");
+    }
+  }
   async function runEditedCode(ctx, code) {
     if (code == null) return;
     if (ctx.runningEdit) return;
-    ctx.runningEdit = true;
+    setEditRunning(ctx, true);
     try {
       await runEditedCodeOnce(ctx, code);
     } finally {
-      ctx.runningEdit = false;
+      setEditRunning(ctx, false);
       if (ctx.autorun && ctx.editedCode != null && ctx.editedCode !== ctx.lastRunCode) scheduleAutorun(ctx);
     }
   }
@@ -2361,6 +2381,7 @@ ${indent}${extra}`);
       ctx.codeWrap.appendChild(pane);
       ctx.inlinePane = pane;
       ctx.inlineStatus = status;
+      ctx.editRunButtons.push(run);
       run.addEventListener("click", () => void runEditedCode(ctx, ctx.inlineEditor?.getValue() ?? ctx.editedCode ?? code));
       reset.addEventListener("click", () => {
         const original = ctx.originalCode ?? code;
@@ -2432,6 +2453,7 @@ ${indent}${extra}`);
     ctx.fsHost = host;
     ctx.fsRun = run;
     ctx.fsReset = reset;
+    ctx.editRunButtons.push(run);
     run.addEventListener("click", () => void runEditedCode(ctx, ctx.fsEditor?.getValue() ?? ctx.editedCode ?? ""));
     reset.addEventListener("click", () => {
       const original = ctx.originalCode ?? ctx.editedCode ?? "";
@@ -2453,7 +2475,13 @@ ${indent}${extra}`);
     ctx.container.setAttribute("aria-label", ctx.title || "3D model fullscreen");
     document.body.classList.add("yacv-fs-open");
     if (ctx.codeWrap) ctx.codeWrap.hidden = true;
-    if (ctx.codeBtn) ctx.codeBtn.hidden = true;
+    if (ctx.codeBtn) {
+      ctx.codeBtn.hidden = false;
+      const codeLabel = ctx.codeBtn.querySelector("span");
+      if (codeLabel) codeLabel.textContent = "Hide code";
+      ctx.codeBtn.title = "Hide the fullscreen code editor";
+      ctx.codeBtn.setAttribute("aria-label", "Hide code");
+    }
     if (ctx.fsBtn) {
       const label = ctx.fsBtn.querySelector("span");
       if (label) label.textContent = "Exit";
@@ -2493,11 +2521,18 @@ ${indent}${extra}`);
       if (event.key === "Escape") {
         event.preventDefault();
         closeFullscreen(ctx);
+        return;
       }
+      if (event.key === "Tab") trapFullscreenFocus(ctx, event);
     };
     ctx.fsResizeHandler = () => ctx.fsEditor?.refresh();
+    ctx.fsMessageHandler = (event) => {
+      if (event.source !== ctx.iframe?.contentWindow) return;
+      if (event.data && event.data.type === "yacv:escape") closeFullscreen(ctx);
+    };
     document.addEventListener("keydown", ctx.fsKeyHandler);
     window.addEventListener("resize", ctx.fsResizeHandler);
+    window.addEventListener("message", ctx.fsMessageHandler);
     if (ctx.stage) void ensureLoaded(ctx);
     requestAnimationFrame(() => {
       ctx.fsEditor?.refresh();
@@ -2518,14 +2553,38 @@ ${indent}${extra}`);
     if (ctx.fsEditor) updateCodeDisplay(ctx, ctx.fsEditor.getValue());
     if (ctx.fsKeyHandler) document.removeEventListener("keydown", ctx.fsKeyHandler);
     if (ctx.fsResizeHandler) window.removeEventListener("resize", ctx.fsResizeHandler);
+    if (ctx.fsMessageHandler) window.removeEventListener("message", ctx.fsMessageHandler);
     ctx.fsKeyHandler = null;
     ctx.fsResizeHandler = null;
+    ctx.fsMessageHandler = null;
     if (ctx.fsBtn) {
       const label = ctx.fsBtn.querySelector("span");
       if (label) label.textContent = "Fullscreen";
       ctx.fsBtn.title = ctx.editable && ctx.hasCode ? "Fullscreen live editor" : "Fullscreen viewer";
       ctx.fsBtn.setAttribute("aria-label", ctx.editable && ctx.hasCode ? "Fullscreen live editor" : "Fullscreen viewer");
       ctx.fsBtn.focus();
+    }
+  }
+  function trapFullscreenFocus(ctx, event) {
+    const selector = 'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], iframe, [tabindex]:not([tabindex="-1"])';
+    const focusable = Array.from(ctx.container.querySelectorAll(selector)).filter(
+      (node) => node.offsetParent !== null && !node.hasAttribute("hidden")
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (!ctx.container.contains(active)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+      return;
+    }
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
     }
   }
   function addFullscreenButton(ctx) {

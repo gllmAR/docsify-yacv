@@ -236,7 +236,10 @@ returns to the read-only view. `autorun` (global or per fence) re-runs 900ms aft
 The toolbar **Fullscreen** action promotes the existing embed to a fixed viewport grid — code on
 the left, the same viewer iframe on the right. The iframe is not moved or recreated, so the loaded
 model, camera and shared worker stay alive. `Escape` or **Exit** returns to the page. The fullscreen
-surface is ours; it never navigates to the external playground.
+surface is ours; it never navigates to the external playground. The toolbar code toggle
+hides/shows the editor pane to maximize the viewer, and Escape also works while focus is inside the
+vendored viewer iframe (it forwards the key to the docs page). Run buttons are disabled while a run
+is in flight.
 
 ```markdown
 ```build123d title="Live knob" autorun

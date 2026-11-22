@@ -150,7 +150,7 @@ The embedded demos run the headless, shared-worker viewer, so Monaco is not load
 live code panel has an **Edit** action for in-place editing, and the toolbar has **Fullscreen** for
 a split code/viewer workspace that fills the page. Both use the same shared Python worker and the
 same viewer iframe, so the camera and loaded geometry stay put; `Ctrl/⌘+Enter` runs, `Escape`
-leaves fullscreen. The editor uses Pupitre UI's code-editor pattern and Prism Python highlighting.
+leaves fullscreen, and the toolbar code toggle hides the editor pane to maximize the viewer. The editor uses Pupitre UI's code-editor pattern and Prism Python highlighting.
 Set `autorun` on a fence (or `autorun: true` globally) to re-run after a short typing pause.
 
 **Open** still opens the full upstream yacv viewer with its Monaco playground (`F10` runs) in a new

@@ -119,6 +119,14 @@ test.describe('docsify-yacv', () => {
     await expect(embed.locator('.yacv-fs-pane')).toBeVisible();
     await expect(embed.locator('.yacv-fs-editor-host .pui-code-editor')).toBeVisible();
     expect(await iframe.getAttribute('src')).toBe(src);
+
+    const fsPane = embed.locator('.yacv-fs-pane');
+    await embed.getByRole('button', { name: 'Hide code' }).click();
+    await expect(fsPane).toBeHidden();
+    await expect(embed).toHaveClass(/yacv-fs-no-editor/);
+    await embed.getByRole('button', { name: 'Show code' }).click();
+    await expect(fsPane).toBeVisible();
+
     const fsArea = embed.locator('.yacv-fs-editor-host textarea');
     await fsArea.fill('from build123d import *\n# Edited fullscreen\nshow(Box(3, 3, 3))');
     await embed.locator('.yacv-fs-actions').getByRole('button', { name: 'Run', exact: true }).click();
