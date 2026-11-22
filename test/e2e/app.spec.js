@@ -348,6 +348,24 @@ test.describe('docsify-yacv', () => {
     await expect.poll(() => workerRequests).toBe(1);
   });
 
+  test('shares a cross-origin worker across tabs via a data: URL', async ({ page, context, browser }) => {
+    const cdp = await browser.newBrowserCDPSession();
+    const sharedWorkers = async () => {
+      const { targetInfos } = await cdp.send('Target.getTargets');
+      return targetInfos.filter(t => t.type === 'shared_worker' && t.url.startsWith('data:text/javascript')).length;
+    };
+
+    await page.goto('/index-worker-cross.html');
+    await expect(page.locator('.yacv-embed')).toHaveAttribute('data-yacv-worker', 'ready');
+    expect(await sharedWorkers()).toBe(1);
+
+    const second = await context.newPage();
+    await second.goto('/index-worker-cross.html');
+    await expect(second.locator('.yacv-embed')).toHaveAttribute('data-yacv-worker', 'ready');
+    expect(await sharedWorkers()).toBe(1);
+    await cdp.detach();
+  });
+
   test('terminates an idle worker and reboots it for a new snippet', async ({ page }) => {
     let workerRequests = 0;
     page.on('request', request => {

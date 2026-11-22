@@ -8,9 +8,13 @@
  * postMessage bridge in `viewer/index.html`.
  *
  * The worker script itself may be cross-origin (the hosted viewer). In that
- * case its text is fetched (GitHub Pages allows CORS) and executed from a Blob
- * worker, which inherits the docs origin. Pyodide is imported from jsDelivr and
- * the bootstrap is passed as an absolute `startupUrl`.
+ * case its text is fetched (GitHub Pages allows CORS) and executed from a
+ * `SharedWorker` created with a stable data: URL, so every docs tab (and every
+ * docs page using the same viewer) shares one interpreter. The data URL is
+ * identical across tabs, which is what makes the browser reuse the worker.
+ * When SharedWorker is unavailable (or disabled) the text runs from a Blob
+ * worker instead. Pyodide is imported from jsDelivr and the bootstrap is passed
+ * as an absolute `startupUrl`.
  */
 
 /** @typedef {{ name: string, hash: string | null, bytes: Uint8Array }} WorkerModel */
@@ -38,30 +42,54 @@ function sameOrigin(url) {
   }
 }
 
-/** @type {Map<string, Promise<string>>} */
+/** @type {Map<string, Promise<{ absolute: string, same: boolean, blobUrl?: string, dataUrl?: string }>>} */
 const workerScripts = new Map();
 
 /**
- * Returns a URL that can be passed to `new Worker` for a same- or cross-origin
- * worker script. Cross-origin scripts are fetched once and wrapped in a Blob
- * URL that inherits the docs origin.
+ * @param {string} text
+ * @returns {string}
+ */
+function base64FromText(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Loads a worker script. Same-origin scripts are served directly; cross-origin
+ * scripts are fetched once (CORS) and exposed both as a Blob URL (dedicated
+ * fallback) and a stable data: URL (shared across tabs by a SharedWorker).
  *
  * @param {string} url
- * @returns {Promise<string>}
+ * @returns {Promise<{ absolute: string, same: boolean, blobUrl?: string, dataUrl?: string }>}
  */
-async function workerScriptUrl(url) {
-  if (sameOrigin(url)) return url;
-  if (!workerScripts.has(url)) {
-    const promise = fetch(url, { mode: 'cors' })
-      .then(response => {
-        if (!response.ok) throw new Error(`Failed to fetch the Python worker (HTTP ${response.status})`);
-        return response.text();
-      })
-      .then(text => URL.createObjectURL(new Blob([text], { type: 'text/javascript' })));
-    promise.catch(() => workerScripts.delete(url));
-    workerScripts.set(url, promise);
+async function loadWorkerScript(url) {
+  const absolute = new URL(url, document.baseURI).href;
+  if (sameOrigin(absolute)) return { absolute, same: true };
+
+  let promise = workerScripts.get(absolute);
+  if (!promise) {
+    promise = (async () => {
+      const response = await fetch(absolute, { mode: 'cors' });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch the Python worker (HTTP ${response.status})`);
+      }
+      const text = await response.text();
+      return {
+        absolute,
+        same: false,
+        blobUrl: URL.createObjectURL(new Blob([text], { type: 'text/javascript' })),
+        dataUrl: `data:text/javascript;base64,${base64FromText(text)}`,
+      };
+    })();
+    promise.catch(() => workerScripts.delete(absolute));
+    workerScripts.set(absolute, promise);
   }
-  return workerScripts.get(url);
+  return promise;
 }
 
 export class WorkerRuntime {
@@ -116,18 +144,21 @@ export class WorkerRuntime {
     if (this.worker) this.dispose();
 
     const ready = (async () => {
-      const scriptUrl = await workerScriptUrl(this.url);
+      const source = await loadWorkerScript(this.url);
       let worker = null;
       let channel = null;
       let shared = false;
 
-      if (this.sharedWorker && sameOrigin(this.url) && typeof SharedWorker !== 'undefined') {
+      if (this.sharedWorker && typeof SharedWorker !== 'undefined') {
         try {
-          const sharedWorker = new SharedWorker(scriptUrl, {
-            type: 'module',
-            // Separate shared interpreters for different build123d settings.
-            name: `docsify-yacv:${settingsKey(this.settings)}`,
-          });
+          const sharedWorker = new SharedWorker(
+            source.same ? source.absolute : source.dataUrl,
+            {
+              type: 'module',
+              // Separate shared interpreters for different worker URLs/settings.
+              name: `docsify-yacv:${source.absolute}:${settingsKey(this.settings)}`,
+            },
+          );
           sharedWorker.port.start();
           worker = sharedWorker;
           channel = sharedWorker.port;
@@ -138,7 +169,7 @@ export class WorkerRuntime {
         }
       }
       if (!channel) {
-        worker = new Worker(scriptUrl, { type: 'module' });
+        worker = new Worker(source.same ? source.absolute : source.blobUrl, { type: 'module' });
         channel = worker;
       }
       this.worker = worker;

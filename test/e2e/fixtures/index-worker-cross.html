@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>cross-origin shared worker e2e</title></head>
+  <body>
+    <div id="app"></div>
+    <script>
+      window.$docsify = {
+        name: 'cross-origin shared worker',
+        homepage: 'worker.md',
+        basePath: '/',
+        yacv: {
+          viewer: '/worker-viewer-stub.html',
+          runtime: 'worker',
+          // Same server, different origin: the plugin must fetch the text and
+          // use a stable data: URL so both tabs share one SharedWorker.
+          workerUrl: 'http://localhost:8123/fake-worker.js',
+          sharedWorker: true,
+          cache: false,
+          version: '0.9.1',
+          lazy: false,
+          unloadOffscreen: false,
+          workerWarmup: false,
+        },
+      };
+    </script>
+    <script src="/docsify.min.js"></script>
+    <script src="/docsify-yacv.js"></script>
+  </body>
+</html>

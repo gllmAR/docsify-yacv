@@ -647,17 +647,37 @@
     }
   }
   var workerScripts = /* @__PURE__ */ new Map();
-  async function workerScriptUrl(url) {
-    if (sameOrigin(url)) return url;
-    if (!workerScripts.has(url)) {
-      const promise = fetch(url, { mode: "cors" }).then((response) => {
-        if (!response.ok) throw new Error(`Failed to fetch the Python worker (HTTP ${response.status})`);
-        return response.text();
-      }).then((text) => URL.createObjectURL(new Blob([text], { type: "text/javascript" })));
-      promise.catch(() => workerScripts.delete(url));
-      workerScripts.set(url, promise);
+  function base64FromText(text) {
+    const bytes = new TextEncoder().encode(text);
+    let binary = "";
+    const chunkSize = 32768;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
     }
-    return workerScripts.get(url);
+    return btoa(binary);
+  }
+  async function loadWorkerScript(url) {
+    const absolute = new URL(url, document.baseURI).href;
+    if (sameOrigin(absolute)) return { absolute, same: true };
+    let promise = workerScripts.get(absolute);
+    if (!promise) {
+      promise = (async () => {
+        const response = await fetch(absolute, { mode: "cors" });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch the Python worker (HTTP ${response.status})`);
+        }
+        const text = await response.text();
+        return {
+          absolute,
+          same: false,
+          blobUrl: URL.createObjectURL(new Blob([text], { type: "text/javascript" })),
+          dataUrl: `data:text/javascript;base64,${base64FromText(text)}`
+        };
+      })();
+      promise.catch(() => workerScripts.delete(absolute));
+      workerScripts.set(absolute, promise);
+    }
+    return promise;
   }
   var WorkerRuntime = class {
     /**
@@ -702,17 +722,20 @@
       if (this.worker && this.ready) return this.ready;
       if (this.worker) this.dispose();
       const ready = (async () => {
-        const scriptUrl = await workerScriptUrl(this.url);
+        const source = await loadWorkerScript(this.url);
         let worker = null;
         let channel = null;
         let shared = false;
-        if (this.sharedWorker && sameOrigin(this.url) && typeof SharedWorker !== "undefined") {
+        if (this.sharedWorker && typeof SharedWorker !== "undefined") {
           try {
-            const sharedWorker = new SharedWorker(scriptUrl, {
-              type: "module",
-              // Separate shared interpreters for different build123d settings.
-              name: `docsify-yacv:${settingsKey(this.settings)}`
-            });
+            const sharedWorker = new SharedWorker(
+              source.same ? source.absolute : source.dataUrl,
+              {
+                type: "module",
+                // Separate shared interpreters for different worker URLs/settings.
+                name: `docsify-yacv:${source.absolute}:${settingsKey(this.settings)}`
+              }
+            );
             sharedWorker.port.start();
             worker = sharedWorker;
             channel = sharedWorker.port;
@@ -723,7 +746,7 @@
           }
         }
         if (!channel) {
-          worker = new Worker(scriptUrl, { type: "module" });
+          worker = new Worker(source.same ? source.absolute : source.blobUrl, { type: "module" });
           channel = worker;
         }
         this.worker = worker;

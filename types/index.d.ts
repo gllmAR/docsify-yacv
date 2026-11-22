@@ -70,8 +70,9 @@ export interface DocsifyYacvOptions {
   /** Pre-boot the shared worker on idle when a live embed exists. Default: true. */
   workerWarmup?: boolean;
   /**
-   * Use a `SharedWorker` when the worker script is same-origin, so all docs
-   * tabs share one interpreter. Default: true (falls back to a dedicated worker).
+   * Use a `SharedWorker` so all docs tabs share one interpreter. Same-origin
+   * scripts load directly; cross-origin scripts run from a stable `data:` URL.
+   * Default: true (falls back to a dedicated Blob worker).
    */
   sharedWorker?: boolean;
   /**

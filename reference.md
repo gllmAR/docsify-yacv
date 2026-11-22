@@ -32,8 +32,8 @@ window.$docsify = {
 | `viewer`       | `string`            | `https://gllmar.github.io/docsify-yacv/viewer/`  | Headless optimized yacv for embeds (absolute or relative). |
 | `openViewer`   | `string`            | `https://yeicor-3d.github.io/yet-another-cad-viewer/` | Viewer used by the **Open** action (full upstream build with the editor). |
 | `runtime`      | `'viewer' \| 'worker'` | `worker`                                     | Shared Pyodide per settings group, or Pyodide per embed. |
-| `workerUrl`    | `string`            | `https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js` | Shared worker script (cross-origin wrapped in a Blob worker). |
-| `sharedWorker` | `boolean`           | `true`                                           | Use a `SharedWorker` for same-origin workers (multi-tab reuse). |
+| `workerUrl`    | `string`            | `https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js` | Shared worker script (cross-origin is fetched and run from a stable `data:` SharedWorker). |
+| `sharedWorker` | `boolean`           | `true`                                           | Use `SharedWorker` so all docs tabs share one interpreter. |
 | `workerWarmup` | `boolean`           | `true`                                           | Pre-boot the shared worker on idle. |
 | `cache`        | `boolean`           | `true`                                           | Cache worker GLBs in IndexedDB for repeat visits. |
 | `workerIdleMs` | `number`            | `1800000`                                        | Stop an idle shared worker (`0` = never). |
@@ -239,10 +239,10 @@ window.$docsify = {
 
 Requirements and limits:
 
-- the worker script may be cross-origin: it is fetched (CORS) and wrapped in a Blob worker on the
-  docs origin; Pyodide and the bootstrap are fetched from their CDNs;
-- same-origin worker URLs use a `SharedWorker` by default, so all docs tabs share one interpreter;
-  cross-origin workers use a per-tab Blob worker. Set `sharedWorker: false` to disable;
+- the worker script may be cross-origin: it is fetched (CORS) and run from a stable `data:` URL,
+  so a `SharedWorker` is reused by every docs tab; same-origin scripts load directly. Pyodide and
+  the bootstrap are fetched from their CDNs;
+- `sharedWorker: false` forces a per-tab dedicated (Blob) worker;
 - the viewer may be cross-origin: models are delivered via the postMessage bridge; a viewer without
   a bridge/API triggers an automatic fallback to the per-viewer runtime;
 - the worker boots once per settings group (~12–20s warm cache), then runs are ~0.5–1s;
@@ -254,7 +254,8 @@ Requirements and limits:
   snippets without booting Pyodide. Disable with `cache: false` for nondeterministic code;
 - idle workers are stopped after `workerIdleMs` (30 min default); use `DocsifyYacv.clearCache()`
   after changing worker/renderer behavior;
-- CSP must allow `blob:` workers, jsDelivr, and the worker script origin. Otherwise use
+- CSP must allow `data:` workers (and `blob:` for the fallback), jsDelivr, and the worker script
+  origin. Otherwise use
   `runtime: 'viewer'` or self-host.
 
 ## Time to interactive
