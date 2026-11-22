@@ -1363,7 +1363,9 @@ async function runEditedCodeOnce(ctx, code) {
   ctx.lastRunCode = code;
   setEditorStatus(ctx, 'Running…');
   if (!ctx.workerMode) {
+    setEditorStatus(ctx, 'Rebuilding the viewer with the per-embed runtime…');
     reload(ctx);
+    setEditorStatus(ctx, 'Viewer rebuilt.');
     return;
   }
   try {
@@ -1371,7 +1373,9 @@ async function runEditedCodeOnce(ctx, code) {
     await ensureLoaded(ctx);
     if (!ctx.workerMode) {
       // The worker failed and the embed switched to the per-viewer runtime.
+      setEditorStatus(ctx, 'Rebuilding the viewer with the per-embed runtime…');
       reload(ctx);
+      setEditorStatus(ctx, 'Viewer rebuilt.');
       return;
     }
     if (ctx.workerPromise) {

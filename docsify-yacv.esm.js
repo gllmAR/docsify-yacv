@@ -2303,14 +2303,18 @@ async function runEditedCodeOnce(ctx, code) {
   ctx.lastRunCode = code;
   setEditorStatus(ctx, "Running\u2026");
   if (!ctx.workerMode) {
+    setEditorStatus(ctx, "Rebuilding the viewer with the per-embed runtime\u2026");
     reload(ctx);
+    setEditorStatus(ctx, "Viewer rebuilt.");
     return;
   }
   try {
     if (ctx.workerPromise) await ctx.workerPromise;
     await ensureLoaded(ctx);
     if (!ctx.workerMode) {
+      setEditorStatus(ctx, "Rebuilding the viewer with the per-embed runtime\u2026");
       reload(ctx);
+      setEditorStatus(ctx, "Viewer rebuilt.");
       return;
     }
     if (ctx.workerPromise) {
