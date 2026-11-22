@@ -67,6 +67,12 @@ export interface DocsifyYacvOptions {
   workerUrl?: string;
   /** Pre-boot the shared worker on idle when a live embed exists. Default: true. */
   workerWarmup?: boolean;
+  /**
+   * Cache worker GLB results in IndexedDB, keyed by code and interpreter
+   * settings. Unchanged snippets render without booting Pyodide on repeat
+   * visits. Default: true.
+   */
+  cache?: boolean;
   /** Maximum number of iframes created at the same time. Default: 2. */
   maxConcurrent?: number;
   /**

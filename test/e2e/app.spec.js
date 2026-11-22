@@ -328,6 +328,24 @@ test.describe('docsify-yacv', () => {
     expect(viewerParams(opened).get('pg_opacity_loading')).toBe('0.9');
   });
 
+  test('caches worker results and skips Pyodide on reload', async ({ page }) => {
+    let workerRequests = 0;
+    page.on('request', request => {
+      if (request.url().endsWith('/fake-worker.js')) workerRequests += 1;
+    });
+    await page.goto('/index-worker.html');
+    const embed = page.locator('.yacv-embed');
+    await expect(embed).toHaveAttribute('data-yacv-worker', 'ready');
+    await expect.poll(() => workerRequests).toBe(1);
+
+    await page.reload();
+    await expect(embed).toHaveAttribute('data-yacv-worker', 'ready');
+    const loaded = await embed.locator('iframe').evaluate(frame => frame.contentWindow.__loaded);
+    expect(loaded.length).toBe(1);
+    expect(loaded[0].name).toBe('part');
+    await expect.poll(() => workerRequests).toBe(1);
+  });
+
   test('limits concurrent iframe loads (maxConcurrent)', async ({ page }) => {
     await page.request.get('/reset-stats');
     await page.goto('/index-concurrency.html');

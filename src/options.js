@@ -118,6 +118,8 @@ export const DEFAULT_OPTIONS = {
   workerUrl: DEFAULT_WORKER,
   /** Pre-boot the shared worker on idle when a live embed exists. */
   workerWarmup: true,
+  /** Cache shared-worker GLB results in IndexedDB (deterministic snippets). */
+  cache: true,
   /** Maximum number of iframes created at the same time. */
   maxConcurrent: 2,
   /**
@@ -178,6 +180,7 @@ export function resolveOptions(userOptions = {}, vm = null) {
   merged.runtime = merged.runtime === 'worker' ? 'worker' : 'viewer';
   merged.workerUrl = merged.workerUrl == null ? '' : String(merged.workerUrl);
   merged.workerWarmup = toBool(merged.workerWarmup, true);
+  merged.cache = toBool(merged.cache, true);
   merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
   merged.maxLiveConcurrent = Math.max(1, Math.floor(toNumber(merged.maxLiveConcurrent, 2)));
   merged.liveSlotMs = Math.max(0, Math.floor(toNumber(merged.liveSlotMs, 30000)));
@@ -252,6 +255,7 @@ export function normalizeEditor(value, fallback = 0) {
  * @property {'viewer' | 'worker'} [runtime] Python runtime: per-viewer or shared worker.
  * @property {string} [workerUrl] Same-origin module worker for `runtime: 'worker'`.
  * @property {boolean} [workerWarmup] Pre-boot the shared worker on idle.
+ * @property {boolean} [cache] Cache worker GLB results in IndexedDB.
  * @property {number} [maxConcurrent] Maximum simultaneous iframe creations.
  * @property {number} [maxLiveConcurrent] Maximum loaded live build123d sandboxes.
  * @property {number} [liveSlotMs] How long a live sandbox holds its slot (`0` = until unload).

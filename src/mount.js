@@ -5,6 +5,7 @@ import { classifyFence, looksLikePython, parseInfoString, parseModelBlock } from
 import { buildParams, buildViewerUrl, normalizeConstraints, parseShowCode, resolveBase } from './url.js';
 import { copyText, cssSize, normalizeKey, resolveUrl, splitList, toBool } from './util.js';
 import { getWorkerRuntime } from './worker-runtime.js';
+import { getCachedResult, putCachedResult } from './result-cache.js';
 
 const PROCESSED = 'data-yacv-processed';
 
@@ -258,6 +259,7 @@ function createEmbed(spec, vm, options) {
     splitList(pick(attrs, 'preview')).length +
     splitList(pick(attrs, 'preload')).length;
   const autoLoad = pick(attrs, 'autoload') === undefined ? options.autoLoad : toBool(pick(attrs, 'autoload'), options.autoLoad);
+  const cache = pick(attrs, 'cache') === undefined ? options.cache : toBool(pick(attrs, 'cache'), options.cache);
   const runtimeMode = stringAttr(pick(attrs, 'runtime')) || options.runtime;
   const workerUrl = stringAttr(pick(attrs, 'worker', 'workerurl')) || options.workerUrl;
   const sameOriginViewer = sameOrigin(viewer);
@@ -345,6 +347,7 @@ function createEmbed(spec, vm, options) {
     posterEl: null,
     version,
     autoLoad,
+    cache,
     lazy,
     chrome,
     workerMode,
@@ -1335,8 +1338,29 @@ async function attachWorkerModels(ctx, iframe) {
 }
 
 /**
+ * @param {EmbedContext} ctx
+ * @param {Array<{ name: string, hash: string | null, bytes: Uint8Array }>} models
+ * @returns {Promise<void>}
+ */
+async function applyWorkerModelsWhenReady(ctx, models) {
+  ctx.workerModels = models;
+  if (!models.length) {
+    setWorkerState(ctx, 'ready');
+    return;
+  }
+  if (ctx.iframe && ctx.state === 'ready') {
+    const bridge = await waitForViewerBridge(ctx, ctx.iframe);
+    if (!bridge) {
+      fallbackToViewerRuntime(ctx, 'the viewer bridge disappeared');
+      return;
+    }
+    applyWorkerModels(ctx);
+  }
+}
+
+/**
  * Runs this embed's code in the shared Python worker and applies the resulting
- * GLBs to the mesh viewer.
+ * GLBs to the mesh viewer. Deterministic results are cached in IndexedDB.
  *
  * @param {EmbedContext} ctx
  * @returns {Promise<void> | null}
@@ -1347,19 +1371,21 @@ function startWorkerRun(ctx) {
     try {
       const code = await ensureCode(ctx);
       if (!code || !code.trim()) return;
+      const cacheInput = { code, settings: ctx.workerSettings, workerUrl: ctx.workerUrl };
+
+      if (ctx.cache) {
+        const cached = await getCachedResult(cacheInput);
+        if (cached && cached.length) {
+          await applyWorkerModelsWhenReady(ctx, cached);
+          return;
+        }
+      }
+
       setWorkerState(ctx, 'booting');
       const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).run(code);
       if (!ctx.workerMode) return; // fell back to the viewer runtime meanwhile
-      ctx.workerModels = models;
-      if (!models.length) setWorkerState(ctx, 'ready');
-      if (ctx.iframe && ctx.state === 'ready') {
-        const bridge = await waitForViewerBridge(ctx, ctx.iframe);
-        if (!bridge) {
-          fallbackToViewerRuntime(ctx, 'the viewer bridge disappeared');
-          return;
-        }
-        applyWorkerModels(ctx);
-      }
+      if (ctx.cache) await putCachedResult(cacheInput, models);
+      await applyWorkerModelsWhenReady(ctx, models);
     } catch (err) {
       if (ctx.workerMode && err && err.phase === 'boot') {
         fallbackToViewerRuntime(ctx, err);
@@ -1410,8 +1436,26 @@ function warmWorker(ctx, allowSpecial = false) {
 
   const key = `${ctx.workerUrl}|${ctx.workerSettings.version}|${ctx.workerSettings.debug}|${ctx.workerSettings.constraints}`;
   if (warmedWorkers.has(key)) return;
-  warmedWorkers.add(key);
-  const start = () => {
+
+  const start = async () => {
+    // Do not boot Pyodide when this embed already has a cached result.
+    if (ctx.cache) {
+      try {
+        const code = await ensureCode(ctx);
+        if (code && code.trim()) {
+          const cached = await getCachedResult({
+            code,
+            settings: ctx.workerSettings,
+            workerUrl: ctx.workerUrl,
+          });
+          if (cached && cached.length) return;
+        }
+      } catch {
+        // Ignore and warm normally.
+      }
+    }
+    if (warmedWorkers.has(key)) return;
+    warmedWorkers.add(key);
     getWorkerRuntime(ctx.workerUrl, ctx.workerSettings)
       .ensure()
       .catch(err => {
@@ -1420,8 +1464,8 @@ function warmWorker(ctx, allowSpecial = false) {
         console.warn('[docsify-yacv] Python worker warmup failed:', err);
       });
   };
-  if (typeof requestIdleCallback === 'function') requestIdleCallback(start, { timeout: 2000 });
-  else setTimeout(start, 800);
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(() => void start(), { timeout: 2000 });
+  else setTimeout(() => void start(), 800);
 }
 
 /**
@@ -1806,6 +1850,7 @@ function without(attrs, keys) {
  * @property {boolean} hasCode
  * @property {boolean} live
  * @property {boolean} autoLoad
+ * @property {boolean} cache
  * @property {boolean} lazy
  * @property {boolean} chrome
  * @property {ReturnType<typeof setTimeout> | null} timer

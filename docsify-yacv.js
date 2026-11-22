@@ -363,6 +363,8 @@
     workerUrl: DEFAULT_WORKER,
     /** Pre-boot the shared worker on idle when a live embed exists. */
     workerWarmup: true,
+    /** Cache shared-worker GLB results in IndexedDB (deterministic snippets). */
+    cache: true,
     /** Maximum number of iframes created at the same time. */
     maxConcurrent: 2,
     /**
@@ -413,6 +415,7 @@
     merged.runtime = merged.runtime === "worker" ? "worker" : "viewer";
     merged.workerUrl = merged.workerUrl == null ? "" : String(merged.workerUrl);
     merged.workerWarmup = toBool(merged.workerWarmup, true);
+    merged.cache = toBool(merged.cache, true);
     merged.maxConcurrent = Math.max(1, Math.floor(toNumber(merged.maxConcurrent, 2)));
     merged.maxLiveConcurrent = Math.max(1, Math.floor(toNumber(merged.maxLiveConcurrent, 2)));
     merged.liveSlotMs = Math.max(0, Math.floor(toNumber(merged.liveSlotMs, 3e4)));
@@ -772,6 +775,130 @@
     return runtime;
   }
 
+  // src/result-cache.js
+  var DB_NAME = "docsify-yacv-results";
+  var STORE = "results";
+  var DB_VERSION = 1;
+  var CACHE_VERSION = "1";
+  var MAX_ENTRIES = 24;
+  var MAX_BYTES = 64 * 1024 * 1024;
+  var dbPromise = null;
+  function openDb() {
+    if (dbPromise) return dbPromise;
+    if (typeof indexedDB === "undefined") return Promise.resolve(null);
+    dbPromise = new Promise((resolve) => {
+      try {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains(STORE)) {
+            const store = db.createObjectStore(STORE, { keyPath: "key" });
+            store.createIndex("ts", "ts");
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => resolve(null);
+        request.onblocked = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+    return dbPromise;
+  }
+  async function cacheKey({ code, settings, workerUrl }) {
+    const subtle = typeof crypto !== "undefined" ? crypto.subtle : null;
+    if (!subtle || typeof TextEncoder === "undefined") return null;
+    const text = [
+      CACHE_VERSION,
+      workerUrl,
+      settings.version,
+      settings.debug ? "1" : "0",
+      settings.constraints,
+      code
+    ].join("\0");
+    try {
+      const digest = await subtle.digest("SHA-256", new TextEncoder().encode(text));
+      return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    } catch {
+      return null;
+    }
+  }
+  async function getCachedResult(input) {
+    const key = await cacheKey(input);
+    if (!key) return null;
+    const db = await openDb();
+    if (!db) return null;
+    try {
+      const record = await new Promise((resolve) => {
+        const tx = db.transaction(STORE, "readonly");
+        const request = tx.objectStore(STORE).get(key);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => resolve(null);
+      });
+      if (!record || !Array.isArray(record.models) || record.models.length === 0) return null;
+      return record.models.filter((model) => model && model.name && model.bytes).map((model) => ({
+        name: String(model.name),
+        hash: model.hash == null ? null : String(model.hash),
+        bytes: model.bytes instanceof Uint8Array ? model.bytes : new Uint8Array(model.bytes.buffer || model.bytes)
+      }));
+    } catch {
+      return null;
+    }
+  }
+  async function putCachedResult(input, models) {
+    const filtered = (models || []).filter((model) => model && model.name && model.bytes && model.bytes.length);
+    if (filtered.length === 0) return;
+    const total = filtered.reduce((sum, model) => sum + model.bytes.length, 0);
+    if (total > MAX_BYTES) return;
+    const key = await cacheKey(input);
+    if (!key) return;
+    const db = await openDb();
+    if (!db) return;
+    try {
+      await new Promise((resolve) => {
+        const tx = db.transaction(STORE, "readwrite");
+        tx.objectStore(STORE).put({
+          key,
+          ts: Date.now(),
+          models: filtered.map((model) => ({
+            name: model.name,
+            hash: model.hash,
+            bytes: model.bytes
+          }))
+        });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+        tx.onabort = () => resolve();
+      });
+      const count = await new Promise((resolve) => {
+        const tx = db.transaction(STORE, "readonly");
+        const request = tx.objectStore(STORE).count();
+        request.onsuccess = () => resolve(request.result || 0);
+        request.onerror = () => resolve(0);
+      });
+      if (count <= MAX_ENTRIES) return;
+      const remove = count - MAX_ENTRIES;
+      await new Promise((resolve) => {
+        const tx = db.transaction(STORE, "readwrite");
+        const store = tx.objectStore(STORE);
+        const cursor = store.index("ts").openCursor();
+        let removed = 0;
+        cursor.onsuccess = () => {
+          const value = cursor.result;
+          if (!value || removed >= remove) {
+            resolve();
+            return;
+          }
+          store.delete(value.primaryKey);
+          removed += 1;
+          value.continue();
+        };
+        cursor.onerror = () => resolve();
+      });
+    } catch {
+    }
+  }
+
   // src/mount.js
   var PROCESSED = "data-yacv-processed";
   var stageContexts = /* @__PURE__ */ new WeakMap();
@@ -936,6 +1063,7 @@
     const version = stringAttr(pick(attrs, "version", "b3dversion", "pgversion", "pg_version")) || options.version;
     const modelCount = spec.models.length + splitList(pick(attrs, "models")).length + splitList(pick(attrs, "src")).length + splitList(pick(attrs, "preview")).length + splitList(pick(attrs, "preload")).length;
     const autoLoad = pick(attrs, "autoload") === void 0 ? options.autoLoad : toBool(pick(attrs, "autoload"), options.autoLoad);
+    const cache2 = pick(attrs, "cache") === void 0 ? options.cache : toBool(pick(attrs, "cache"), options.cache);
     const runtimeMode = stringAttr(pick(attrs, "runtime")) || options.runtime;
     const workerUrl = stringAttr(pick(attrs, "worker", "workerurl")) || options.workerUrl;
     const sameOriginViewer = sameOrigin2(viewer);
@@ -1011,6 +1139,7 @@
       posterEl: null,
       version,
       autoLoad,
+      cache: cache2,
       lazy,
       chrome,
       workerMode,
@@ -1710,25 +1839,40 @@
       void startWorkerRun(ctx);
     }
   }
+  async function applyWorkerModelsWhenReady(ctx, models) {
+    ctx.workerModels = models;
+    if (!models.length) {
+      setWorkerState(ctx, "ready");
+      return;
+    }
+    if (ctx.iframe && ctx.state === "ready") {
+      const bridge = await waitForViewerBridge(ctx, ctx.iframe);
+      if (!bridge) {
+        fallbackToViewerRuntime(ctx, "the viewer bridge disappeared");
+        return;
+      }
+      applyWorkerModels(ctx);
+    }
+  }
   function startWorkerRun(ctx) {
     if (!ctx.workerMode || ctx.workerPromise || ctx.workerModels) return ctx.workerPromise;
     ctx.workerPromise = (async () => {
       try {
         const code = await ensureCode(ctx);
         if (!code || !code.trim()) return;
+        const cacheInput = { code, settings: ctx.workerSettings, workerUrl: ctx.workerUrl };
+        if (ctx.cache) {
+          const cached = await getCachedResult(cacheInput);
+          if (cached && cached.length) {
+            await applyWorkerModelsWhenReady(ctx, cached);
+            return;
+          }
+        }
         setWorkerState(ctx, "booting");
         const models = await getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).run(code);
         if (!ctx.workerMode) return;
-        ctx.workerModels = models;
-        if (!models.length) setWorkerState(ctx, "ready");
-        if (ctx.iframe && ctx.state === "ready") {
-          const bridge = await waitForViewerBridge(ctx, ctx.iframe);
-          if (!bridge) {
-            fallbackToViewerRuntime(ctx, "the viewer bridge disappeared");
-            return;
-          }
-          applyWorkerModels(ctx);
-        }
+        if (ctx.cache) await putCachedResult(cacheInput, models);
+        await applyWorkerModelsWhenReady(ctx, models);
       } catch (err) {
         if (ctx.workerMode && err && err.phase === "boot") {
           fallbackToViewerRuntime(ctx, err);
@@ -1761,15 +1905,30 @@
     if (!allowSpecial && !isBase) return;
     const key = `${ctx.workerUrl}|${ctx.workerSettings.version}|${ctx.workerSettings.debug}|${ctx.workerSettings.constraints}`;
     if (warmedWorkers.has(key)) return;
-    warmedWorkers.add(key);
-    const start = () => {
+    const start = async () => {
+      if (ctx.cache) {
+        try {
+          const code = await ensureCode(ctx);
+          if (code && code.trim()) {
+            const cached = await getCachedResult({
+              code,
+              settings: ctx.workerSettings,
+              workerUrl: ctx.workerUrl
+            });
+            if (cached && cached.length) return;
+          }
+        } catch {
+        }
+      }
+      if (warmedWorkers.has(key)) return;
+      warmedWorkers.add(key);
       getWorkerRuntime(ctx.workerUrl, ctx.workerSettings).ensure().catch((err) => {
         setWorkerState(ctx, "error");
         console.warn("[docsify-yacv] Python worker warmup failed:", err);
       });
     };
-    if (typeof requestIdleCallback === "function") requestIdleCallback(start, { timeout: 2e3 });
-    else setTimeout(start, 800);
+    if (typeof requestIdleCallback === "function") requestIdleCallback(() => void start(), { timeout: 2e3 });
+    else setTimeout(() => void start(), 800);
   }
   function addRunButton(ctx) {
     if (!ctx.chrome || !ctx.actions) return;

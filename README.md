@@ -223,6 +223,7 @@ window.$docsify = {
 | `runtime` | `worker` | `worker` (shared Pyodide per settings group) or `viewer` (Pyodide per embed). |
 | `workerUrl` | `https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js` | Shared worker script (cross-origin is wrapped in a Blob worker). |
 | `workerWarmup` | `true` | Pre-boot the shared worker on idle when a live embed exists. |
+| `cache` | `true` | Cache worker GLBs in IndexedDB; unchanged snippets skip Pyodide on repeat visits. |
 | `height` | `480px` | Default stage height (number = px, CSS length, or `auto`). |
 | `title` | `''` | Default toolbar title. |
 | `poster` | `''` | Poster image for preview-only (`auto-load=false`) embeds; shown instantly. |
@@ -324,6 +325,9 @@ window.$docsify = {
 - `workerWarmup` (default `true`) pre-boots the worker on idle for auto-load live embeds; preview-only
   embeds warm shortly after their preview/poster appears (or on pointer/focus intent).
 - `maxLiveConcurrent` is bypassed in worker mode (each worker serializes its runs).
+- Worker GLBs are cached in IndexedDB by code + settings. Repeat visits render unchanged
+  snippets **without booting Pyodide at all**; set `cache: false` (or `cache=false` on a fence) for
+  snippets whose output depends on time/randomness/files.
 - If your CSP blocks `blob:` workers or jsDelivr, use `runtime: 'viewer'` or self-host a compatible
   worker. Copying `viewer/` + `yacv-worker.js` next to your docs gives a same-origin offline setup.
 
@@ -340,6 +344,7 @@ Measured on the live demo with a warm browser cache (Chromium, M1-class machine)
 | Live build123d, optimized viewer (per-viewer runtime) | **~15s** warm cache |
 | Live build123d, shared worker, **first** example | ~12–20s boot (preview/poster visible meanwhile) |
 | Live build123d, shared worker, **later** examples | **~0.5–1s** |
+| Live build123d, shared worker, **cached repeat visit** | **no Pyodide boot** (IndexedDB GLB) |
 | Live build123d, upstream viewer | ~21–30s (includes Monaco) |
 
 The live sandbox cost is dominated by Pyodide boot plus installing/importing build123d, OCP and the

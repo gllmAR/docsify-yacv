@@ -34,6 +34,7 @@ window.$docsify = {
 | `runtime`      | `'viewer' \| 'worker'` | `worker`                                     | Shared Pyodide per settings group, or Pyodide per embed. |
 | `workerUrl`    | `string`            | `https://gllmar.github.io/docsify-yacv/viewer/yacv-worker.js` | Shared worker script (cross-origin wrapped in a Blob worker). |
 | `workerWarmup` | `boolean`           | `true`                                           | Pre-boot the shared worker on idle. |
+| `cache`        | `boolean`           | `true`                                           | Cache worker GLBs in IndexedDB for repeat visits. |
 | `height`       | `number \| string`  | `480px`                                          | Default viewer height. Numbers are pixels; `auto` uses a 4:3 area. |
 | `title`        | `string`            | `''`                                             | Default toolbar title. |
 | `poster`       | `string`            | `''`                                             | Poster image for preview-only (`auto-load=false`) embeds. |
@@ -85,6 +86,7 @@ show(Box(10, 10, 10))
 | `open`            |                            | `false` hides the **Open** action. |
 | `viewer`          |                            | Override the viewer URL for this embed. |
 | `runtime`         |                            | `viewer` or `worker` for this embed (workers are shared per settings). |
+| `cache`           |                            | `false` disables the IndexedDB result cache for this embed. |
 
 Any [yacv setting](#yacv-settings) can also be used as an attribute (case-insensitive, dashes and
 underscores are ignored): `edgeWidth=2`, `autoplay=false`, `pg_opacity_loaded=0.5`, ...
@@ -230,6 +232,8 @@ Requirements and limits:
 - `workerWarmup: true` (default) pre-boots on idle for auto-load live embeds; preview-only embeds
   warm shortly after their preview/poster or on pointer/focus intent; `false` disables it;
 - `maxLiveConcurrent` is ignored in worker mode;
+- worker GLBs are cached in IndexedDB keyed by code + settings; repeat visits render unchanged
+  snippets without booting Pyodide. Disable with `cache: false` for nondeterministic code;
 - CSP must allow `blob:` workers, jsDelivr, and the worker script origin. Otherwise use
   `runtime: 'viewer'` or self-host.
 
