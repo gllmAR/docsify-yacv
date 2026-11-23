@@ -2413,6 +2413,13 @@ async function openInlineEditor(ctx) {
   requestAnimationFrame(() => {
     ctx.inlineEditor?.refresh();
     ctx.inlineEditor?.focus();
+    const area = ctx.inlinePane?.querySelector("textarea");
+    if (area) {
+      area.setSelectionRange(0, 0);
+      area.scrollTop = 0;
+      area.scrollLeft = 0;
+    }
+    ctx.inlineEditor?.refresh();
   });
 }
 function closeInlineEditor(ctx) {
@@ -2541,6 +2548,13 @@ async function openFullscreen(ctx) {
   requestAnimationFrame(() => {
     ctx.fsEditor?.refresh();
     ctx.fsEditor?.focus();
+    const area = ctx.fsHost?.querySelector("textarea");
+    if (area) {
+      area.setSelectionRange(0, 0);
+      area.scrollTop = 0;
+      area.scrollLeft = 0;
+    }
+    ctx.fsEditor?.refresh();
   });
 }
 function closeFullscreen(ctx) {
@@ -3516,7 +3530,7 @@ var CSS = `
   min-height: 0;
 }
 
-.yacv-embed .yacv-pui-editor.pui {
+.yacv-pui-editor.pui {
   --pui-bg: rgba(128, 128, 128, 0.08);
   --pui-surface: transparent;
   --pui-surface-2: rgba(128, 128, 128, 0.16);
@@ -3539,13 +3553,78 @@ var CSS = `
   height: 100%;
 }
 
-.yacv-pui-editor .pui-code-editor {
-  font-family: var(--yacv-mono);
-  font-size: 12.5px;
+.yacv-pui-editor .pui-code-editor,
+.yacv-pui-editor .pui-code-highlight,
+.yacv-pui-editor .pui-code-input,
+.yacv-pui-editor .pui-code-gutter {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace !important;
+  font-size: 12.5px !important;
+  line-height: 18.75px !important;
+  font-variant-ligatures: none;
+  letter-spacing: normal;
+  tab-size: 2;
 }
 
 .yacv-pui-editor .pui-code-highlight {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 1 !important;
+  margin: 0 !important;
+  padding: 8px 8px 8px 52px !important;
+  border: 0 !important;
+  background: transparent !important;
   color: inherit;
+  white-space: pre !important;
+  overflow: auto !important;
+}
+
+.yacv-pui-editor .pui-code-input {
+  margin: 0 !important;
+  padding: 8px 8px 8px 52px !important;
+  border: 0 !important;
+  white-space: pre !important;
+  overflow: auto !important;
+}
+
+.yacv-pui-editor .pui-code-gutter {
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+}
+
+/* Prism's theme may bold/italicize tokens, which changes advance widths and
+   makes the highlight drift from the transparent textarea. */
+.yacv-pui-editor .pui-code-highlight .token,
+.yacv-pui-editor .pui-code-highlight .token * {
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  letter-spacing: normal !important;
+}
+
+/* Docsify themes style markdown pre blocks above the PUI class; reset the
+   exact properties that break the overlay alignment. */
+.markdown-section .yacv-pui-editor .pui-code-highlight,
+.markdown-section .yacv-pui-editor .pui-code-highlight code {
+  position: absolute !important;
+  inset: 0 !important;
+  margin: 0 !important;
+  padding: 8px 8px 8px 52px !important;
+  border: 0 !important;
+  background: transparent !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace !important;
+  font-size: 12.5px !important;
+  line-height: 18.75px !important;
+  white-space: pre !important;
+}
+
+.markdown-section .yacv-pui-editor .pui-code-input {
+  margin: 0 !important;
+  padding: 8px 8px 8px 52px !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace !important;
+  font-size: 12.5px !important;
+  line-height: 18.75px !important;
 }
 
 .yacv-pui-editor .token.comment {

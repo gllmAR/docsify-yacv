@@ -1491,6 +1491,13 @@ async function openInlineEditor(ctx) {
   requestAnimationFrame(() => {
     ctx.inlineEditor?.refresh();
     ctx.inlineEditor?.focus();
+    const area = ctx.inlinePane?.querySelector('textarea');
+    if (area) {
+      area.setSelectionRange(0, 0);
+      area.scrollTop = 0;
+      area.scrollLeft = 0;
+    }
+    ctx.inlineEditor?.refresh();
   });
 }
 
@@ -1638,6 +1645,13 @@ async function openFullscreen(ctx) {
   requestAnimationFrame(() => {
     ctx.fsEditor?.refresh();
     ctx.fsEditor?.focus();
+    const area = ctx.fsHost?.querySelector('textarea');
+    if (area) {
+      area.setSelectionRange(0, 0);
+      area.scrollTop = 0;
+      area.scrollLeft = 0;
+    }
+    ctx.fsEditor?.refresh();
   });
 }
 

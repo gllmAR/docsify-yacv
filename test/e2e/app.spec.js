@@ -104,6 +104,34 @@ test.describe('docsify-yacv', () => {
     await expect(inline).toBeVisible();
     await expect(inline.locator('.pui-code-editor')).toBeVisible();
     await expect(inline.locator('.pui-code-gutter span').first()).toBeVisible();
+    await expect(page.locator('link[data-yacv-pui-css][data-loaded="1"]')).toHaveCount(1);
+    const geometry = await inline.evaluate(element => {
+      const area = element.querySelector('textarea');
+      const pre = element.querySelector('.pui-code-highlight');
+      const a = getComputedStyle(area);
+      const b = getComputedStyle(pre);
+      const ar = area.getBoundingClientRect();
+      const br = pre.getBoundingClientRect();
+      return {
+        fonts: [a.fontFamily, b.fontFamily],
+        sizes: [a.fontSize, b.fontSize],
+        lines: [a.lineHeight, b.lineHeight],
+        pads: [a.padding, b.padding],
+        margins: [a.margin, b.margin],
+        top: Math.round(ar.top - br.top),
+        left: Math.round(ar.left - br.left),
+        height: Math.round(ar.height - br.height),
+      };
+    });
+    expect(new Set(geometry.fonts).size).toBe(1);
+    expect(geometry.fonts[0]).toContain('mono');
+    expect(new Set(geometry.sizes).size).toBe(1);
+    expect(new Set(geometry.lines).size).toBe(1);
+    expect(new Set(geometry.pads).size).toBe(1);
+    expect(new Set(geometry.margins).size).toBe(1);
+    expect(geometry.top).toBe(0);
+    expect(geometry.left).toBe(0);
+    expect(geometry.height).toBe(0);
     const textarea = inline.locator('textarea');
     await expect(textarea).toHaveValue(/show\(Box\(1, 1, 1\)\)/);
     await textarea.fill('from build123d import *\n# Edited\nshow(Box(2, 2, 2))');
